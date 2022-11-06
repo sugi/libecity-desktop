@@ -1,22 +1,48 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import * as path from "path";
 
 function createWindow() {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    height: 600,
+    height: 1200,
+    width: 1600,
+    title: "リベシティ",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
-    width: 800,
   });
 
   // and load the index.html of the app.
-  mainWindow.loadFile(path.join(__dirname, "../index.html"));
+  // mainWindow.loadFile(path.join(__dirname, "../index.html"));
+  mainWindow.loadURL("https://libecity.com/");
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+
+  mainWindow.on("close", (e) => {
+    mainWindow.hide();
+    e.preventDefault();
+  });
+
+  ipcMain.on("show-main-window", () => {
+    console.log("show main window");
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  ipcMain.on("hide-main-window", () => {
+    mainWindow.hide();
+  });
 
   // Open the DevTools.
   mainWindow.webContents.openDevTools();
 }
+
+app.setName("libecity-desktop");
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
