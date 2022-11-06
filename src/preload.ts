@@ -24,23 +24,27 @@ const getNotifications = (): NotificationItem[] => {
 };
 
 const startNotificationObserver = () => {
-  let lastChecked = new Date(0);
+  let lastItemDate = new Date(0);
 
-  const notifyNewItmes = () => {
+  const notifyNewNotifications = () => {
     if (!document.querySelector(".notificationIcon.is_notifice")) return;
-    getNotifications()
+    const items = getNotifications();
+    if (!items.length || items[0].date <= lastItemDate) return;
+    items
+      .concat()
       .reverse()
       .forEach((i) => {
-        if (i.date < lastChecked) return;
+        if (i.date <= lastItemDate) return;
         new Notification(i.title, {
           body: i.body,
         }).addEventListener("click", () =>
           ipcRenderer.send("show-main-window")
         );
       });
-    lastChecked = new Date();
+    lastItemDate = items[0].date;
   };
-  setInterval(notifyNewItmes, 5 * 1000);
+  setTimeout(notifyNewNotifications, 5000);
+  setInterval(notifyNewNotifications, 30 * 1000);
 };
 
 window.addEventListener("DOMContentLoaded", () => {
