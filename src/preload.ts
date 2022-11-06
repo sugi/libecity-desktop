@@ -44,34 +44,5 @@ const startNotificationObserver = () => {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
-  console.log("loaded");
   startNotificationObserver();
-
-  const replaceText = (selector: string, text: string) => {
-    const element = document.querySelector(selector) as HTMLElement;
-    if (element) {
-      element.innerText = text;
-    }
-  };
-
-  setTimeout(() => {
-    replaceText(
-      "#content-mainNav > div.form_data_area.is_search > div > div.header_searchBtn_wrap > div.header_searchBtn.searchTrend > a > span",
-      "とれんど"
-    );
-    document
-      .querySelector(
-        "#content-mainNav > div.form_data_area.is_search > div > div.header_searchBtn_wrap > div.header_searchBtn.searchTrend > a"
-      )
-      ?.addEventListener("click", () => {
-        console.log("notify");
-        new Notification("hoge", { body: "fuga" }).addEventListener(
-          "click",
-          (e) => {
-            ipcRenderer.send("show-main-window");
-            console.log(e);
-          }
-        );
-      });
-  }, 5000);
 });
