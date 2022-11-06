@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell, Tray } from "electron";
 import * as path from "path";
 
 function createWindow() {
@@ -29,7 +29,6 @@ function createWindow() {
   });
 
   ipcMain.on("show-main-window", () => {
-    console.log("show main window");
     mainWindow.show();
     mainWindow.focus();
   });
@@ -40,6 +39,8 @@ function createWindow() {
 
   // Open the DevTools.
   mainWindow.webContents.openDevTools();
+
+  return mainWindow;
 }
 
 app.setName("libecity-desktop");
@@ -48,7 +49,15 @@ app.setName("libecity-desktop");
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  createWindow();
+  const win = createWindow();
+
+  const tray = new Tray("./trayicon.png");
+  tray.setTitle("リベシティ");
+  tray.setToolTip("リベシティ");
+  tray.addListener("click", () => {
+    win.show();
+    win.focus();
+  });
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
