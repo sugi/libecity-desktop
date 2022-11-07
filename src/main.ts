@@ -1,14 +1,14 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
+import windowStateKeeper = require("electron-window-state");
 
 let terminating = false;
 
-function createWindow() {
+function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    height: 1200,
-    width: 1600,
     title: "リベシティ",
+    ...options,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
@@ -50,7 +50,17 @@ app.setName("libecity-desktop");
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  const win = createWindow();
+  const winState = windowStateKeeper({
+    defaultWidth: 1000,
+    defaultHeight: 800,
+  });
+  const win = createWindow({
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
+  });
+  winState.manage(win);
   const showMainWindow = () => {
     win.show();
     win.focus();
