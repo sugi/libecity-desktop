@@ -24,24 +24,43 @@ const getNotifications = (): NotificationItem[] => {
 };
 
 const startNotificationObserver = () => {
-  let lastItemDate = new Date(0);
+  let lastNotifiedItems: NotificationItem[] = [];
 
   const notifyNewNotifications = () => {
-    if (!document.querySelector(".notificationIcon.is_notifice")) return;
+    const notified: NotificationItem[] = [];
+    if (!document.querySelector(".notificationIcon.is_notifice")) {
+      ipcRenderer.send("icon-default");
+      return;
+    }
+    ipcRenderer.send("icon-notification");
     const items = getNotifications();
-    if (!items.length || items[0].date <= lastItemDate) return;
+    if (
+      !items.length ||
+      (lastNotifiedItems.length &&
+        JSON.stringify(items[0]) ===
+          JSON.stringify(lastNotifiedItems[lastNotifiedItems.length - 1]))
+    )
+      return;
     items
       .concat()
       .reverse()
+      .filter(
+        (i) =>
+          !lastNotifiedItems.length ||
+          (lastNotifiedItems[lastNotifiedItems.length - 1].date <= i.date &&
+            !lastNotifiedItems.find(
+              (l) => JSON.stringify(i) === JSON.stringify(l)
+            ))
+      )
       .forEach((i) => {
-        if (i.date <= lastItemDate) return;
         new Notification(i.title, {
           body: i.body,
         }).addEventListener("click", () =>
           ipcRenderer.send("show-main-window")
         );
+        notified.push(i);
       });
-    lastItemDate = items[0].date;
+    lastNotifiedItems = notified;
   };
   setTimeout(notifyNewNotifications, 5000);
   setInterval(notifyNewNotifications, 30 * 1000);

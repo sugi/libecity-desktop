@@ -2,6 +2,12 @@ import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
 import windowStateKeeper = require("electron-window-state");
 
+const iconPath = {
+  default: path.join(__dirname, "..", "images", "trayicon.png"),
+  hasNotification: path.join(__dirname, "..", "images", "trayicon-rd.png"),
+  hasNewMessage: path.join(__dirname, "..", "images", "trayicon-gd.png"),
+};
+
 let terminating = false;
 
 function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
@@ -54,7 +60,7 @@ app.whenReady().then(() => {
     defaultWidth: 1000,
     defaultHeight: 800,
   });
-  const win = createWindow({
+  let win = createWindow({
     width: winState.width,
     height: winState.height,
     x: winState.x,
@@ -66,7 +72,7 @@ app.whenReady().then(() => {
     win.focus();
   };
 
-  const tray = new Tray("./trayicon.png");
+  const tray = new Tray(iconPath.default);
   tray.setTitle("リベシティ");
   tray.setToolTip("リベシティ");
 
@@ -83,13 +89,29 @@ app.whenReady().then(() => {
   ]);
 
   tray.setContextMenu(contextMenu);
-
   tray.addListener("click", showMainWindow);
+
+  ipcMain.on("icon-notification", () => {
+    tray.setImage(iconPath.hasNotification);
+  });
+  ipcMain.on("icon-new-message", () => {
+    tray.setImage(iconPath.hasNewMessage);
+  });
+  ipcMain.on("icon-default", () => {
+    tray.setImage(iconPath.default);
+  });
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      win = createWindow({
+        width: winState.width,
+        height: winState.height,
+        x: winState.x,
+        y: winState.y,
+      });
+    }
   });
 });
 
