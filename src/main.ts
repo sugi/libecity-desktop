@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
+
+let terminating = false;
 
 function createWindow() {
   // Create the browser window.
@@ -24,8 +26,10 @@ function createWindow() {
   });
 
   mainWindow.on("close", (e) => {
-    mainWindow.hide();
-    e.preventDefault();
+    if (!terminating) {
+      mainWindow.hide();
+      e.preventDefault();
+    }
   });
 
   ipcMain.on("show-main-window", () => {
@@ -37,9 +41,6 @@ function createWindow() {
     mainWindow.hide();
   });
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
-
   return mainWindow;
 }
 
@@ -50,14 +51,30 @@ app.setName("libecity-desktop");
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   const win = createWindow();
+  const showMainWindow = () => {
+    win.show();
+    win.focus();
+  };
 
   const tray = new Tray("./trayicon.png");
   tray.setTitle("リベシティ");
   tray.setToolTip("リベシティ");
-  tray.addListener("click", () => {
-    win.show();
-    win.focus();
-  });
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: "チャットを表示", click: showMainWindow },
+    { type: "separator" },
+    {
+      label: "終了する",
+      click() {
+        terminating = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.addListener("click", showMainWindow);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
@@ -70,6 +87,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
+  console.log("all closed");
   if (process.platform !== "darwin") {
     app.quit();
   }
