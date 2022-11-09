@@ -29,6 +29,10 @@ const startNotificationObserver = () => {
   const notifyNewNotifications = () => {
     const notified: NotificationItem[] = [];
     if (!document.querySelector(".notificationIcon.is_notifice")) {
+      if (document.querySelector(".chat_item .count_unread.rounded-circle")) {
+        ipcRenderer.send("icon-new-message");
+        return;
+      }
       ipcRenderer.send("icon-default");
       return;
     }

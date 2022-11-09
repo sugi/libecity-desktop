@@ -2,7 +2,7 @@ module.exports = {
   packagerConfig: {},
   rebuildConfig: {},
   ignore: [
-    'src'
+    'src',
   ],
   makers: [
 //    {
