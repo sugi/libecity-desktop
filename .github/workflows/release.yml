@@ -18,13 +18,12 @@ jobs:
           node-version: 18
       - run: npm i
       - run: npm run build
-      - run: npm run electron-forge make -a x64,arm64 -p darwin
-      - run: npm run electron-forge make -a x64,arm64 -p linux
-      - uses: docker://antonyurchenko/git-release:latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm run electron-forge -- make -a x64,arm64 -p darwin
+      - run: npm run electron-forge -- make -a x64,arm64 -p linux
+      - uses: ncipollo/release-action@v1
         with:
-          args: "out/make/**.{deb,rpm,zip}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "out/make/**.{deb,rpm,zip}"
 
   build-and-release-windows:
     runs-on: windows-latest
@@ -37,9 +36,8 @@ jobs:
         with:
           node-version: 18
       - run: npm i
-      - run: npm run make -a ia32 -p win32
-      - uses: docker://antonyurchenko/git-release:latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm run make -- -a ia32 -p win32
+      - uses: ncipollo/release-action@v1
         with:
-          args: "out/make/**.{deb,rpm,zip}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "out/make/**.{deb,rpm,zip}"
