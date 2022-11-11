@@ -24,6 +24,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: "out/make/**.{deb,rpm,zip}"
+          allowUpdates: true
 
   build-and-release-windows:
     runs-on: windows-latest
@@ -41,3 +42,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: "out/make/**.{deb,rpm,zip}"
+          allowUpdates: true
