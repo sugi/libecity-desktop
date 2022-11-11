@@ -6,7 +6,27 @@ on:
   workflow_dispatch:
   
 jobs:
-  build:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm i
+      - run: npm run build
+      - run: npm run electron-forge make -a x64,arm64 -p darwin
+      - run: npm run electron-forge make -a x64,arm64 -p linux
+      - uses: docker://antonyurchenko/git-release:latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: "out/make/**.{deb,rpm,zip}"
+
+  build-and-release-windows:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -17,7 +37,7 @@ jobs:
         with:
           node-version: 18
       - run: npm i
-      - run: npm run make:all
+      - run: npm run make -a ia32 -p win32
       - uses: docker://antonyurchenko/git-release:latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
