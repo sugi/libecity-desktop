@@ -1,0 +1,23 @@
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - run: npm i
+      - run: npm run make:all
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "out/make/**.{deb,rpm,zip}"
+          token: ${{ secrets.YOUR_GITHUB_TOKEN }}
