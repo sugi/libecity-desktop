@@ -20,10 +20,11 @@ jobs:
       - run: npm run build
       - run: npm run electron-forge -- make -a x64,arm64 -p darwin
       - run: npm run electron-forge -- make -a x64,arm64 -p linux
+      - run: rm -r out/libecity-desktop*
       - uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "out/make/**.{deb,rpm,zip}"
+          artifacts: "out/make/deb/*/*.deb,out/make/rpm/*/*.rpm,out/make/zip/*/*/*.zip"
           allowUpdates: true
 
   build-and-release-windows:
@@ -41,5 +42,5 @@ jobs:
       - uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: "out/make/**.{deb,rpm,zip}"
+          artifacts: "out/make/zip/*/*/*.zip,out/make/*/*/*.exe"
           allowUpdates: true
