@@ -29,7 +29,7 @@
     "@electron-forge/maker-zip": "^6.0.1",
     "@types/keyv": "^4.2.0",
     "@typescript-eslint/eslint-plugin": "^5.42.1",
-    "@typescript-eslint/parser": "^5.42.1",
+    "@typescript-eslint/parser": "^5.43.0",
     "electron": "^21.2.3",
     "eslint": "^8.27.0",
     "keyv": "^4.5.2",
