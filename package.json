@@ -30,7 +30,7 @@
     "@types/keyv": "^4.2.0",
     "@typescript-eslint/eslint-plugin": "^5.48.0",
     "@typescript-eslint/parser": "^5.48.0",
-    "electron": "^22.0.0",
+    "electron": "^23.1.0",
     "eslint": "^8.31.0",
     "keyv": "^4.5.2",
     "typescript": "^4.9.4"
