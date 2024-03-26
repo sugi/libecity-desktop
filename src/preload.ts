@@ -70,6 +70,13 @@ const startNotificationObserver = () => {
   setInterval(notifyNewNotifications, 30 * 1000);
 };
 
+const injectCSS = () => {
+  const style = document.createElement('STYLE');
+  style.textContent = '#notificationMenu { max-height: 90vh; }'
+  document.head.appendChild(style);
+};
+
 window.addEventListener("DOMContentLoaded", () => {
   startNotificationObserver();
+  injectCSS();
 });
