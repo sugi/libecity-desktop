@@ -1,9 +1,15 @@
 module.exports = {
-  packagerConfig: {},
+  packagerConfig: {
+    ignore: [
+      '^src/',
+      '^\\.git',
+      '^\\.github/',
+      '\\..*rc',
+      '^tsconfig\\.json',
+      '^out/',
+    ],
+  },
   rebuildConfig: {},
-  ignore: [
-    'src',
-  ],
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
