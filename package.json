@@ -1,9 +1,9 @@
 {
   "name": "libecity-desktop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "libecity desktop app",
   "scripts": {
-    "build": "tsc",
+    "build": "node build.mjs && chmod o+r dist/*",
     "watch": "tsc -w",
     "lint": "eslint -c .eslintrc --ext .ts ./src",
     "start": "npm run build && electron-forge start",
@@ -22,21 +22,23 @@
   "author": "GitHub",
   "license": "MIT",
   "devDependencies": {
-    "@electron-forge/cli": "^7.3.1",
-    "@electron-forge/maker-deb": "^7.3.1",
-    "@electron-forge/maker-rpm": "^7.3.1",
-    "@electron-forge/maker-squirrel": "^7.3.1",
-    "@electron-forge/maker-zip": "^7.3.1",
+    "@electron-forge/cli": "^7.5.0",
+    "@electron-forge/maker-deb": "^7.5.0",
+    "@electron-forge/maker-rpm": "^7.5.0",
+    "@electron-forge/maker-squirrel": "^7.5.0",
+    "@electron-forge/maker-zip": "^7.5.0",
     "@types/keyv": "^4.2.0",
-    "@typescript-eslint/eslint-plugin": "^7.4.0",
-    "@typescript-eslint/parser": "^7.4.0",
-    "electron": "^29.1.5",
-    "eslint": "^8.57.0",
-    "keyv": "^4.5.4",
-    "typescript": "^5.4.3"
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "electron": "^32.1.2",
+    "esbuild": "0.24.0",
+    "eslint": "^9.12.0",
+    "firebase": "^10.14.0",
+    "keyv": "^5.1.0",
+    "typescript": "^5.6.2"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.0",
+    "electron-squirrel-startup": "^1.0.1",
     "electron-window-state": "^5.0.3"
   }
 }

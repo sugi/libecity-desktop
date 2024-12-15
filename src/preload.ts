@@ -1,7 +1,11 @@
 // All of the Node.js APIs are available in the preload process.
 // It has the same sandbox as a Chrome extension.
 
-import { ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
+import { FirebaseApp, initializeApp } from "firebase/app";
+import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
+
+let firebaseApp: FirebaseApp | undefined = undefined;
 
 type NotificationItem = { title: string; body: string; date: Date };
 
@@ -70,13 +74,15 @@ const startNotificationObserver = () => {
   setInterval(notifyNewNotifications, 30 * 1000);
 };
 
-const injectCSS = () => {
-  const style = document.createElement('STYLE');
-  style.textContent = '#notificationMenu { max-height: 90vh; }'
+const inject = () => {
+  ipcRenderer.send('inject-renderer')
+  const style = document.createElement("STYLE");
+  style.textContent = ''
   document.head.appendChild(style);
 };
 
 window.addEventListener("DOMContentLoaded", () => {
   startNotificationObserver();
-  injectCSS();
+  inject();
+  console.log('DCL')
 });

@@ -8,9 +8,6 @@
     "baseUrl": ".",
     "skipLibCheck": true,
     "target": "es2016",
-    "paths": {
-      "*": ["node_modules/*"]
-    }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*"]
 }

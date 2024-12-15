@@ -7,6 +7,7 @@ module.exports = {
       '\\..*rc',
       '^tsconfig\\.json',
       '^out/',
+      '^node_modules/.*',
     ],
   },
   rebuildConfig: {},

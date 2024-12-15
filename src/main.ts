@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
+import * as fs from "fs";
 import windowStateKeeper = require("electron-window-state");
 
 const iconPath = {
@@ -17,17 +18,37 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 const showMainWindow = () => {
-  mainWindow?.show();
-  mainWindow?.focus();
+  if (typeof mainWindow === "undefined") {
+    mainWindow = createWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
 };
 const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
+ipcMain.on("inject-renderer", () => {
+  if (!mainWindow) return;
+  mainWindow.webContents.executeJavaScript(
+    fs.readFileSync(path.join(__dirname, "renderer.js")).toString()
+  );
+});
+
 function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
+  const winState = windowStateKeeper({
+    defaultWidth: 1000,
+    defaultHeight: 800,
+  });
+
   // Create the browser window.
   const win = new BrowserWindow({
     title: "リベシティ",
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
     ...options,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -35,7 +56,7 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   });
 
   // and load the index.html of the app.
-  // mainWindow.loadFile(path.join(__dirname, "../index.html"));
+  // win.loadFile(path.join(__dirname, "../index.html"));
   win.loadURL("https://libecity.com/");
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -46,12 +67,10 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   });
 
   win.on("close", (e) => {
-    if (!terminating) {
-      win.hide();
-      e.preventDefault();
-    }
+    mainWindow = undefined;
   });
 
+  winState.manage(win);
   return win;
 }
 
@@ -63,17 +82,7 @@ app.setName("libecity-desktop");
 app.whenReady().then(() => {
   if (terminating) return;
 
-  const winState = windowStateKeeper({
-    defaultWidth: 1000,
-    defaultHeight: 800,
-  });
-  mainWindow = createWindow({
-    width: winState.width,
-    height: winState.height,
-    x: winState.x,
-    y: winState.y,
-  });
-  winState.manage(mainWindow);
+  mainWindow = createWindow();
 
   const tray = new Tray(iconPath.default);
   tray.setTitle("リベシティ");
@@ -108,12 +117,7 @@ app.whenReady().then(() => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow({
-        width: winState.width,
-        height: winState.height,
-        x: winState.x,
-        y: winState.y,
-      });
+      mainWindow = createWindow();
     }
   });
 });
@@ -122,7 +126,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && terminating) {
     app.quit();
   }
 });
