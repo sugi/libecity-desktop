@@ -60,7 +60,9 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   win.loadURL("https://libecity.com/");
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
+    if (url.startsWith("https://libecity.com/")) {
+      win.loadURL(url);
+    } else if (url.startsWith("http://") || url.startsWith("https://")) {
       shell.openExternal(url);
     }
     return { action: "deny" };
