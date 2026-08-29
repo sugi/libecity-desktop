@@ -12,10 +12,10 @@ jobs:
       contents: write
     
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 18
+          node-version: 22
       - run: npm i
       - run: npm run build
       - run: npm run electron-forge -- make -a x64,arm64 -p darwin
@@ -33,12 +33,12 @@ jobs:
       contents: write
     
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 18
+          node-version: 22
       - run: npm i
-      - run: npm run make -- -a ia32 -p win32
+      - run: npm run make -- -a x64 -p win32
       - uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
