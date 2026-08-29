@@ -5,13 +5,13 @@
   "scripts": {
     "build": "node build.mjs && chmod o+r dist/*",
     "watch": "tsc -w",
-    "lint": "eslint -c .eslintrc --ext .ts ./src",
+    "lint": "eslint ./src",
     "start": "npm run build && electron-forge start",
     "clean": "rm -rf dist",
     "electron-forge": "electron-forge",
     "package": "npm run clean && npm run build && electron-forge package",
     "make": "npm run clean && npm run build && electron-forge make",
-    "make:all": "npm run clean && npm run build && electron-forge make -a x64,arm64 -p darwin && electron-forge make -a x64,arm64 -p linux && electron-forge make -a ia32 -p win32"
+    "make:all": "npm run clean && npm run build && electron-forge make -a x64,arm64 -p darwin && electron-forge make -a x64,arm64 -p linux && electron-forge make -a x64 -p win32"
   },
   "main": "dist/main.js",
   "repository": "TBW",
@@ -22,23 +22,27 @@
   "author": "GitHub",
   "license": "MIT",
   "devDependencies": {
-    "@electron-forge/cli": "^7.5.0",
-    "@electron-forge/maker-deb": "^7.5.0",
-    "@electron-forge/maker-rpm": "^7.5.0",
-    "@electron-forge/maker-squirrel": "^7.5.0",
-    "@electron-forge/maker-zip": "^7.5.0",
-    "@types/keyv": "^4.2.0",
-    "@typescript-eslint/eslint-plugin": "^8.8.0",
-    "@typescript-eslint/parser": "^8.8.0",
-    "electron": "^32.1.2",
-    "esbuild": "0.24.0",
-    "eslint": "^9.12.0",
-    "firebase": "^10.14.0",
-    "keyv": "^5.1.0",
-    "typescript": "^5.6.2"
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-deb": "^7.11.2",
+    "@electron-forge/maker-rpm": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@eslint/js": "^10.0.1",
+    "electron": "^44.0.0",
+    "esbuild": "0.28.2",
+    "eslint": "^10.9.1",
+    "firebase": "^12.18.0",
+    "keyv": "^5.6.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.68.0"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
     "electron-window-state": "^5.0.3"
+  },
+  "overrides": {
+    "tar": "^7.5.22",
+    "tmp": "^0.2.7",
+    "brace-expansion": "^5.0.2"
   }
 }
