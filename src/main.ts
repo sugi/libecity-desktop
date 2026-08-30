@@ -235,6 +235,15 @@ function createWindow(
 }
 
 app.setName("libecity-desktop");
+// Without this the notification carries no desktop-entry hint, and KDE drops
+// it from the notification centre once the popup expires - which leaves a
+// notification nobody can click any more, since the popup is gone and there is
+// nothing in the centre to click. Verified over D-Bus: the same notification
+// persists with the hint and does not without it.
+// Linux-only API; guarded rather than trusted to be a no-op elsewhere.
+if (process.platform === "linux") {
+  app.setDesktopName("libecity-desktop.desktop");
+}
 
 // The webview hands over the Firebase session after login. Persist the refresh
 // token so the daemon can run without a window, and (re)start it.
