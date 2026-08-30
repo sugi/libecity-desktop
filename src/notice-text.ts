@@ -95,8 +95,9 @@ const expiry = (n: Notice) => {
 };
 
 // Ported from the site's Notice.title getter. Where it throws for an unknown
-// type, this falls back to "新しいお知らせがあります" - also our own coinage,
-// not the site's, because the daemon must not die over a new one.
+// type, this falls back to the notice's own message, or - if it has none -
+// to "新しいお知らせがあります", also our own coinage, not the site's,
+// because the daemon must not die over a new one.
 export function noticeTitle(n: Notice): string {
   if (n.original_title) return n.original_title;
   const who = n.user_name ?? "";

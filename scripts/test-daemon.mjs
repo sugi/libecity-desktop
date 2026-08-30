@@ -3,6 +3,11 @@
 // pure decision logic (tray state, tRPC parsing, new-item seeding/diff).
 // Run: node scripts/test-daemon.mjs
 
+// The formatters under test deliberately read local time (getDate, setDate,
+// getFullYear), so the suite has to pin a timezone to be reproducible. Must
+// be set before anything below constructs a Date.
+process.env.TZ = "UTC";
+
 import * as esbuild from "esbuild";
 import { pathToFileURL } from "url";
 import * as fs from "fs";
@@ -387,6 +392,7 @@ eq("url policy: a non-default port is external", classifyUrl("https://libecity.c
 eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.COM/x"), "internal");
 // userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
+eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
 
 fs.unlinkSync(outfile);
 if (failures) {
