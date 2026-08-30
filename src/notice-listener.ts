@@ -76,6 +76,7 @@ export class NoticeListener {
   private unsubs: Unsubscribe[] = [];
   private db?: Firestore;
   private started = false;
+  private startedUid?: string;
   private failed = false;
   private ops: Promise<void> = Promise.resolve();
   // Health is per subscription: a snapshot is evidence only about its own
@@ -94,6 +95,14 @@ export class NoticeListener {
 
   get running(): boolean {
     return this.started;
+  }
+
+  // The account the listener is currently running for (or was last started
+  // for), so a caller can tell a repeat auth-session for the same account
+  // apart from one that needs a restart - the account's identity, unlike the
+  // refresh token, does not rotate out from under this comparison.
+  get uid(): string | undefined {
+    return this.startedUid;
   }
 
   // start() and stop() share one chain because restoreAuth() and releaseAuth()
@@ -153,6 +162,7 @@ export class NoticeListener {
       this.watchTray(db, session.uid);
       this.watchNotices(db, session.uid);
       this.started = true;
+      this.startedUid = session.uid;
       this.failed = false;
       safeLog("listener-start", { uid: session.uid });
       return true;
@@ -178,6 +188,7 @@ export class NoticeListener {
     }
     this.unsubs = [];
     this.started = false;
+    this.startedUid = undefined;
     // Demoting here, ahead of the awaits below, is the same trade fail() makes:
     // the fallback has to be told before the slow cleanup, not after it. The
     // baseline goes with it, so the next start rebuilds one from its own first

@@ -153,13 +153,8 @@ const listener = new NoticeListener({
 // not the same as data arriving. The daemon's first tick only seeds its
 // baseline, so the overlap cannot double-fire a notification.
 
-// The token the listener is currently running with (or was last asked to
-// run with), so a repeat auth-session for the same account can be told apart
-// from one worth acting on.
-let listenerToken: string | undefined;
 const startNotifications = (refreshToken: string) => {
   daemon.start(refreshToken);
-  listenerToken = refreshToken;
   void listener.start(refreshToken).then((ok) => {
     if (!ok) {
       log("listener-start-failed");
@@ -247,13 +242,18 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
   if (terminating) return;
   saveRefreshToken(session.refreshToken);
   // Every window sends this on open even when nothing changed - the preload
-  // has no way to know the token it read back is the one the listener is
-  // already running with. Skip the restart in that case: it would otherwise
-  // tear down and re-subscribe a healthy listener on every window, losing
-  // whatever arrives during the gap. A different token (another account) or a
-  // listener that is not running (this is then the self-heal path, since
-  // nothing else retries a failed start on its own) still goes through.
-  if (session.refreshToken === listenerToken && listener.running) return;
+  // has no way to know the account it read back is the one the listener is
+  // already running for. Skip the restart in that case: it would otherwise
+  // tear down and re-subscribe a healthy listener on every window (or, at
+  // launch, on the second of two back-to-back restores), losing whatever
+  // arrives during the gap. The comparison is by uid, not by refresh token:
+  // the preload's token is whatever the renderer's own copy of the Firebase
+  // SDK currently holds and rotates on its own schedule, so two restores of
+  // the same account can legitimately carry different tokens. A different
+  // uid (another account) or a listener that is not running (this is then
+  // the self-heal path, since nothing else retries a failed start on its
+  // own) still goes through.
+  if (session.uid === listener.uid && listener.running) return;
   startNotifications(session.refreshToken);
 });
 
@@ -262,7 +262,6 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
 // they left - on a shared machine, indefinitely.
 ipcMain.on("auth-signed-out", () => {
   log("auth-signed-out");
-  listenerToken = undefined;
   listenerRestart.cancel();
   daemon.stop();
   void listener.stop();
