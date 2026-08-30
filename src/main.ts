@@ -27,6 +27,7 @@ if (!app.isPackaged) {
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let trayReady = false;
 
 // Squirrel runs the exe with --squirrel-install/--squirrel-updated to have it
 // create and migrate shortcuts, then exit. Booting the real app instead leaves
@@ -279,6 +280,7 @@ app.whenReady().then(() => {
 
     tray.setContextMenu(contextMenu);
     tray.addListener("click", showMainWindow);
+    trayReady = true;
     console.log(`[tray] created on ${process.platform}`);
   } catch (err) {
     console.error("[tray] failed to create:", err);
@@ -298,13 +300,13 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// Closing the window is "hide to tray", not "quit" - except on macOS, where the
+// app lives in the menu bar anyway, and except when the tray failed to appear,
+// where keeping the process alive would leave it running with no window, no
+// icon and no way to quit it.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" && terminating) {
-    app.quit();
-  }
+  if (process.platform === "darwin") return;
+  if (terminating || !trayReady) app.quit();
 });
 
 // In this file you can include the rest of your app"s specific main process
@@ -315,6 +317,9 @@ app.on("window-all-closed", () => {
 app.on("will-quit", closeDump);
 
 app.on("second-instance", () => {
+  // The lock is taken at module load, so this can arrive before ready - and
+  // new BrowserWindow() throws outright until then.
+  if (!app.isReady()) return;
   showMainWindow();
 });
 
