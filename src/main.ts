@@ -18,6 +18,11 @@ if (!app.isPackaged) {
   app.setPath("userData", `${app.getPath("userData")}-dev`);
 }
 
+// Sticky for the life of the process: once true, nothing here may start the
+// daemon again. Set by the tray's quit item and, as a catch-all for every
+// other way a quit can begin (Cmd+Q, OS shutdown, a second instance losing
+// the lock), by before-quit itself - synchronously, so it is already true
+// before listener.stop()'s queued teardown can run its demote.
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -90,6 +95,10 @@ const listener = new NoticeListener({
       daemon.stop();
       return;
     }
+    // A quit in progress can still deliver this demote (teardown() signals
+    // before its awaits), and by then falling back to polling would be
+    // re-arming what before-quit just stopped.
+    if (terminating) return;
     const token = loadRefreshToken();
     if (token) {
       daemon.start(token);
@@ -174,6 +183,9 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
     expirationTime: session.expirationTime,
   });
   if (!session.refreshToken) return;
+  // updateRefreshToken() falls back to starting the daemon internally when
+  // no client exists yet, so this must not run once a quit is under way.
+  if (terminating) return;
   saveRefreshToken(session.refreshToken);
   daemon.updateRefreshToken(session.refreshToken);
   startNotifications(session.refreshToken);
@@ -246,8 +258,12 @@ app.on("second-instance", () => {
   showMainWindow();
 });
 
-// An open Firestore stream holds handles that would outlive the quit.
+// An open Firestore stream holds handles that would outlive the quit. Setting
+// terminating here, first and synchronously, closes off every daemon.start()
+// call in this file before listener.stop()'s queued teardown - which signals
+// its demote ahead of its own awaits - can reach the setHealthy handler below.
 app.on("before-quit", () => {
+  terminating = true;
   daemon.stop();
   void listener.stop();
 });
