@@ -429,6 +429,8 @@ eq("redact: a bank account is masked", redact({ account_number: "1234567" }).acc
 eq("redact: an address is masked", redact({ address: "東京都" }).address, "<redacted len=3>");
 eq("redact: a long opaque blob is replaced", redact({ note: "a".repeat(100) }).note, "<blob:100>");
 eq("redact: a short identifier is left alone", redact({ note: "room-abc123" }).note, "room-abc123");
+eq("redact: a bare auth key is masked", redact({ auth: "abc" }).auth, "<redacted len=3>");
+eq("redact: a bare sessionId key is masked", redact({ sessionId: "abc" }).sessionId, "<redacted len=3>");
 eq("redact: the webchannel sid is stripped",
   redact({ u: "https://x/y?sid=AAAA&gsessionid=BBBB" }).u,
   "https://x/y?sid=<redacted>&gsessionid=<redacted>");

@@ -16,6 +16,8 @@ const SECRET_KEYS = new Set([
   "accesstoken",
   "refreshtoken",
   "authtoken",
+  "auth",
+  "sessionid",
   "sessiontoken",
   "password",
   "secret",
