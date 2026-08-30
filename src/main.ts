@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, session, shell, Tray } from "electron";
 import * as path from "path";
 import windowStateKeeper from "electron-window-state";
 import squirrelStartup from "electron-squirrel-startup";
@@ -235,6 +235,24 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
 
 app.whenReady().then(() => {
   if (terminating) return;
+
+  // The window renders a site we do not control. Nothing it can ask for is
+  // needed by the chat, except pasting and going fullscreen on a video; the
+  // desktop notifications come from the main process, not from the page.
+  // Denials are logged so a feature that breaks names the permission it wants.
+  const ALLOWED_PERMISSIONS = new Set([
+    "clipboard-read",
+    "clipboard-sanitized-write",
+    "fullscreen",
+  ]);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    const allowed = ALLOWED_PERMISSIONS.has(permission);
+    if (!allowed) log("permission-denied", { permission });
+    callback(allowed);
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED_PERMISSIONS.has(permission)
+  );
 
   const dumpPath = openDump();
   if (dumpPath) console.log(`[dump] writing API traffic to ${dumpPath}`);
