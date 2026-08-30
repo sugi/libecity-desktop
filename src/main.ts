@@ -9,7 +9,7 @@ import { log } from "./log";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 import { NoticeListener } from "./notice-listener";
 import { renderTrayIcon } from "./tray-icon";
-import { classifyUrl } from "./url-policy";
+import { classifyUrl, mayNavigate } from "./url-policy";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
 // newer than its own, so hopping between Electron versions during development
@@ -184,6 +184,19 @@ function createWindow(
     }
     return { action: "deny" };
   });
+
+  // setWindowOpenHandler only covers window.open and target=_blank. A plain
+  // link, location.href, a form post or a server redirect moves this window
+  // itself, and without this the app would keep its title and its preload
+  // while showing somebody else's page.
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    if (mayNavigate(url)) return;
+    event.preventDefault();
+    log("navigation-blocked", { url });
+    openUrl(url);
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
 
   win.on("close", () => {
     mainWindow = undefined;
