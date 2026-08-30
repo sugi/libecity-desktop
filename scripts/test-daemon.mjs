@@ -394,6 +394,25 @@ eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.CO
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
 
+// --- noticeUrl: only a rooted path may be joined to the site ---
+eq("url: a schemeless other_url is not glued onto the origin",
+  noticeUrl(N("beginners_live", { other_url: "evil.example/x" })), undefined);
+eq("url: a userinfo payload in other_url is dropped",
+  noticeUrl(N("recruit", { other_url: "@evil.example/x" })), undefined);
+eq("url: a suffix payload in other_url is dropped",
+  noticeUrl(N("other_live", { other_url: ".evil.example/phish" })), undefined);
+eq("url: a host-relative other_url is dropped",
+  noticeUrl(N("recruit", { other_url: "//evil.example/x" })), undefined);
+eq("url: a bare word other_url is dropped",
+  noticeUrl(N("recruit", { other_url: "somewhere" })), undefined);
+eq("url: an absolute off-site other_url still passes through",
+  noticeUrl(N("recruit", { other_url: "https://www.youtube.com/live/x" })),
+  "https://www.youtube.com/live/x");
+eq("url: a rooted other_url is still joined to the site",
+  noticeUrl(N("recruit", { other_url: "/mypage/top" })), `${SITE}/mypage/top`);
+eq("url: an ordinary switch path is unaffected",
+  noticeUrl(N("followed", { follower_uid: "U1" })), `${SITE}/user_profile/U1`);
+
 fs.unlinkSync(outfile);
 if (failures) {
   console.error(`\n${failures} test(s) failed`);
