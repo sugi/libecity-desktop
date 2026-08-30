@@ -153,9 +153,18 @@ const listener = new NoticeListener({
 // not the same as data arriving. The daemon's first tick only seeds its
 // baseline, so the overlap cannot double-fire a notification.
 
+// True from the moment a start is requested until it settles. listener.uid and
+// listener.running only become meaningful once startImpl has run, which is
+// after a token mint and an accounts:lookup - and the preload fires its first
+// auth-session on DOMContentLoaded, squarely inside that window. Without this
+// the guard below reads an unstarted listener and restarts it, which is two
+// full restores on every launch.
+let startInFlight = false;
 const startNotifications = (refreshToken: string) => {
   daemon.start(refreshToken);
+  startInFlight = true;
   void listener.start(refreshToken).then((ok) => {
+    startInFlight = false;
     if (!ok) {
       log("listener-start-failed");
       listenerRestart.schedule();
@@ -253,6 +262,10 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
   // uid (another account) or a listener that is not running still goes
   // through - opening a window is then a second way back, alongside
   // listenerRestart's backoff.
+  // A start already under way settles into exactly this state, so let it.
+  // If it turns out to be a different account, the preload resends every 15s
+  // and the uid comparison below then catches it.
+  if (startInFlight) return;
   if (session.uid === listener.uid && listener.running) return;
   startNotifications(session.refreshToken);
 });
