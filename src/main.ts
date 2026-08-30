@@ -1,15 +1,43 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, session, shell, Tray } from "electron";
 import * as path from "path";
-import windowStateKeeper = require("electron-window-state");
+import windowStateKeeper from "electron-window-state";
+import squirrelStartup from "electron-squirrel-startup";
+import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
+import { type AuthSession } from "./firebase-auth";
+import { clearRefreshToken, loadRefreshToken, saveRefreshToken } from "./session-store";
+import { log } from "./log";
+import { NotificationDaemon, type TrayState } from "./notification-daemon";
+import { NoticeListener } from "./notice-listener";
+import { RestartScheduler } from "./restart-scheduler";
+import { renderTrayIcon } from "./tray-icon";
+import { classifyUrl, mayNavigate } from "./url-policy";
 
-const iconPath = {
-  default: path.join(__dirname, "..", "images", "trayicon.png"),
-  hasNotification: path.join(__dirname, "..", "images", "trayicon-rd.png"),
-  hasNewMessage: path.join(__dirname, "..", "images", "trayicon-gd.png"),
-};
+// Chromium deletes an IndexedDB store whose Blink serialization format is
+// newer than its own, so hopping between Electron versions during development
+// wipes the login state. Keeping the dev profile separate also gives it its own
+// single-instance lock, so a dev run and the installed app can coexist.
+if (!app.isPackaged) {
+  app.setPath("userData", `${app.getPath("userData")}-dev`);
+}
 
+// Sticky for the life of the process: once true, nothing here may start the
+// daemon again. Set by the tray's quit item and, as a catch-all for every
+// other way a quit can begin (Cmd+Q, OS shutdown, a second instance losing
+// the lock), by before-quit itself - synchronously, so it is already true
+// before listener.stop()'s queued teardown can run its demote.
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
+let trayReady = false;
+
+// Squirrel runs the exe with --squirrel-install/--squirrel-updated to have it
+// create and migrate shortcuts, then exit. Booting the real app instead leaves
+// the install with no shortcuts, and on update the second process would lose
+// the lock below and quit before the migration ran.
+if (squirrelStartup) {
+  terminating = true;
+  app.quit();
+}
 
 if (!app.requestSingleInstanceLock()) {
   terminating = true;
@@ -17,17 +45,149 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 const showMainWindow = () => {
-  mainWindow?.show();
-  mainWindow?.focus();
+  if (typeof mainWindow === "undefined") {
+    mainWindow = createWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
 };
 const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
-function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
+// Notifications carry a target, but the daemon's fallback path and the
+// listener's collapsed "他 N 件" toast pass none by design - that just means
+// "show the window", not a hostile or unparseable URL worth a rejection log.
+const openUrl = (url?: string) => {
+  if (url === undefined) {
+    showMainWindow();
+    return;
+  }
+  switch (classifyUrl(url)) {
+    case "internal":
+      if (typeof mainWindow === "undefined") {
+        mainWindow = createWindow(url);
+        return;
+      }
+      mainWindow.show();
+      mainWindow.focus();
+      void mainWindow.loadURL(url as string);
+      return;
+    case "external":
+      void shell.openExternal(url as string);
+      return;
+    case "reject":
+      log("open-url-rejected", { url });
+      showMainWindow();
+      return;
+  }
+};
+
+// The daemon polls; only touch the tray when the picture would change.
+let shownTray: string | undefined;
+const setTray = (state: TrayState, unread: number) => {
+  if (!tray) return;
+  const key = `${state}:${unread}`;
+  if (key === shownTray) return;
+  shownTray = key;
+  tray.setImage(renderTrayIcon(state, unread));
+  tray.setToolTip(unread > 0 ? `リベシティ (${unread})` : "リベシティ");
+};
+
+const daemon = new NotificationDaemon({ setTray, openUrl });
+
+// Which path is live is decided by the listener's health, not by whether it
+// started: the poll runs whenever the listener is not reaching the server, so
+// startup, a terminal error and a connection that merely went quiet are all
+// the same case here. An outage that never resolves therefore polls forever,
+// which is the degradation we want.
+// Nothing else retries the listener: its only other entry point is the
+// auth-session IPC, which needs an open window, and the whole point of the
+// listener is running without one. One transient failure at boot would
+// otherwise leave the app on the 15-minute poll for the life of the process.
+const listenerRestart = new RestartScheduler({
+  attempt: () => {
+    if (terminating) return Promise.resolve(true);
+    const token = loadRefreshToken();
+    if (!token) {
+      log("listener-retry-skipped", { reason: "no-refresh-token" });
+      return Promise.resolve(true);
+    }
+    return listener.start(token);
+  },
+  onSchedule: (delayMs) => log("listener-retry-scheduled", { delayMs }),
+});
+
+let listenerHealthy = false;
+const listener = new NoticeListener({
+  setTray,
+  openUrl,
+  setHealthy: (healthy) => {
+    if (healthy === listenerHealthy) return;
+    listenerHealthy = healthy;
+    if (healthy) {
+      listenerRestart.cancel();
+      daemon.stop();
+      return;
+    }
+    // A quit in progress can still deliver this demote (teardown() signals
+    // before its awaits), and by then falling back to polling would be
+    // re-arming what before-quit just stopped.
+    if (terminating) return;
+    const token = loadRefreshToken();
+    if (token) {
+      daemon.start(token);
+    } else {
+      log("poll-fallback-skipped", { reason: "no-refresh-token" });
+    }
+    listenerRestart.schedule();
+  },
+});
+
+// The listener is preferred, but nothing bounds how long its start() takes -
+// the token refresh underneath it is a bare fetch with no AbortSignal, so a
+// stalled connect would leave the app with neither path running and nothing
+// logged. The poll therefore runs from the start, and only setHealthy stops
+// it: start() resolving true means the subscriptions are registered, which is
+// not the same as data arriving. The daemon's first tick only seeds its
+// baseline, so the overlap cannot double-fire a notification.
+
+// True from the moment a start is requested until it settles. listener.uid and
+// listener.running only become meaningful once startImpl has run, which is
+// after a token mint and an accounts:lookup - and the preload fires its first
+// auth-session on DOMContentLoaded, squarely inside that window. Without this
+// the guard below reads an unstarted listener and restarts it, which is two
+// full restores on every launch.
+let startInFlight = false;
+const startNotifications = (refreshToken: string) => {
+  daemon.start(refreshToken);
+  startInFlight = true;
+  void listener.start(refreshToken).then((ok) => {
+    startInFlight = false;
+    if (!ok) {
+      log("listener-start-failed");
+      listenerRestart.schedule();
+    }
+  });
+};
+
+function createWindow(
+  url = "https://libecity.com/",
+  options?: Electron.BrowserWindowConstructorOptions
+) {
+  const winState = windowStateKeeper({
+    defaultWidth: 1000,
+    defaultHeight: 800,
+  });
+
   // Create the browser window.
   const win = new BrowserWindow({
     title: "リベシティ",
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
     ...options,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -35,103 +195,199 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   });
 
   // and load the index.html of the app.
-  // mainWindow.loadFile(path.join(__dirname, "../index.html"));
-  win.loadURL("https://libecity.com/");
+  // win.loadFile(path.join(__dirname, "../index.html"));
+  void attachTrafficDump(win.webContents);
+  win.loadURL(url);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      shell.openExternal(url);
+    switch (classifyUrl(url)) {
+      case "internal":
+        win.loadURL(url);
+        break;
+      case "external":
+        shell.openExternal(url);
+        break;
+      case "reject":
+        break;
     }
     return { action: "deny" };
   });
 
-  win.on("close", (e) => {
-    if (!terminating) {
-      win.hide();
-      e.preventDefault();
-    }
+  // setWindowOpenHandler only covers window.open and target=_blank. A plain
+  // link, location.href, a form post or a server redirect moves this window
+  // itself, and without this the app would keep its title and its preload
+  // while showing somebody else's page.
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    if (mayNavigate(url)) return;
+    event.preventDefault();
+    log("navigation-blocked", { url });
+    openUrl(url);
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
+
+  win.on("close", () => {
+    mainWindow = undefined;
   });
 
+  winState.manage(win);
   return win;
 }
 
 app.setName("libecity-desktop");
+// Without this the notification carries no desktop-entry hint, and KDE drops
+// it from the notification centre once the popup expires - which leaves a
+// notification nobody can click any more, since the popup is gone and there is
+// nothing in the centre to click. Verified over D-Bus: the same notification
+// persists with the hint and does not without it.
+// Linux-only API; guarded rather than trusted to be a no-op elsewhere.
+if (process.platform === "linux") {
+  app.setDesktopName("libecity-desktop.desktop");
+}
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+// The webview hands over the Firebase session after login. Persist the refresh
+// token so the daemon can run without a window, and (re)start it.
+ipcMain.on("auth-session", (_event, session: AuthSession) => {
+  record("auth-session", {
+    uid: session.uid,
+    email: session.email,
+    hasRefreshToken: Boolean(session.refreshToken),
+    expirationTime: session.expirationTime,
+  });
+  if (!session.refreshToken) return;
+  // This reaches startNotifications(), which reaches daemon.start(), so it
+  // must not run once a quit is under way.
+  if (terminating) return;
+  saveRefreshToken(session.refreshToken);
+  // Every window sends this on open even when nothing changed - the preload
+  // has no way to know the account it read back is the one the listener is
+  // already running for. Skip the restart in that case: it would otherwise
+  // tear down and re-subscribe a healthy listener on every window (or, at
+  // launch, on the second of two back-to-back restores), losing whatever
+  // arrives during the gap. The comparison is by uid, not by refresh token:
+  // the preload's token is whatever the renderer's own copy of the Firebase
+  // SDK currently holds and rotates on its own schedule, so two restores of
+  // the same account can legitimately carry different tokens. A different
+  // uid (another account) or a listener that is not running still goes
+  // through - opening a window is then a second way back, alongside
+  // listenerRestart's backoff.
+  // A start already under way settles into exactly this state, so let it.
+  // If it turns out to be a different account, the preload resends every 15s
+  // and the uid comparison below then catches it.
+  if (startInFlight) return;
+  if (session.uid === listener.uid && listener.running) return;
+  startNotifications(session.refreshToken);
+});
+
+// Signing out in the page does not revoke the refresh token server-side, so
+// without this the daemon would go on reading the account the user believes
+// they left - on a shared machine, indefinitely.
+ipcMain.on("auth-signed-out", () => {
+  log("auth-signed-out");
+  listenerRestart.cancel();
+  daemon.stop();
+  void listener.stop();
+  clearRefreshToken();
+});
+
 app.whenReady().then(() => {
   if (terminating) return;
 
-  const winState = windowStateKeeper({
-    defaultWidth: 1000,
-    defaultHeight: 800,
-  });
-  mainWindow = createWindow({
-    width: winState.width,
-    height: winState.height,
-    x: winState.x,
-    y: winState.y,
-  });
-  winState.manage(mainWindow);
-
-  const tray = new Tray(iconPath.default);
-  tray.setTitle("リベシティ");
-  tray.setToolTip("リベシティ");
-
-  const contextMenu = Menu.buildFromTemplate([
-    { label: "チャットを表示", click: showMainWindow },
-    { type: "separator" },
-    {
-      label: "終了する",
-      click() {
-        terminating = true;
-        app.quit();
-      },
-    },
+  // The window renders a site we do not control. Nothing it can ask for is
+  // needed by the chat, except pasting and going fullscreen on a video; the
+  // desktop notifications come from the main process, not from the page.
+  // Denials are logged so a feature that breaks names the permission it wants.
+  const ALLOWED_PERMISSIONS = new Set([
+    "clipboard-read",
+    "clipboard-sanitized-write",
+    "fullscreen",
   ]);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    const allowed = ALLOWED_PERMISSIONS.has(permission);
+    if (!allowed) log("permission-denied", { permission });
+    callback(allowed);
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED_PERMISSIONS.has(permission)
+  );
 
-  tray.setContextMenu(contextMenu);
-  tray.addListener("click", showMainWindow);
+  const dumpPath = openDump();
+  if (dumpPath) console.log(`[dump] writing API traffic to ${dumpPath}`);
 
-  ipcMain.on("icon-notification", () => {
-    tray.setImage(iconPath.hasNotification);
-  });
-  ipcMain.on("icon-new-message", () => {
-    tray.setImage(iconPath.hasNewMessage);
-  });
-  ipcMain.on("icon-default", () => {
-    tray.setImage(iconPath.default);
-  });
+  mainWindow = createWindow();
+
+  // A tray failure must not abort the rest of startup (daemon, activate).
+  try {
+    tray = new Tray(renderTrayIcon("default", 0));
+    tray.setTitle("リベシティ");
+    tray.setToolTip("リベシティ");
+
+    const contextMenu = Menu.buildFromTemplate([
+      { label: "チャットを表示", click: showMainWindow },
+      { type: "separator" },
+      {
+        label: "終了する",
+        click() {
+          terminating = true;
+          app.quit();
+        },
+      },
+    ]);
+
+    tray.setContextMenu(contextMenu);
+    tray.addListener("click", showMainWindow);
+    trayReady = true;
+    console.log(`[tray] created on ${process.platform}`);
+  } catch (err) {
+    console.error("[tray] failed to create:", err);
+  }
+
+  // Start notifications immediately from a stored session, before any login -
+  // this is what lets notifications work with the window closed.
+  const stored = loadRefreshToken();
+  if (stored) startNotifications(stored);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow({
-        width: winState.width,
-        height: winState.height,
-        x: winState.x,
-        y: winState.y,
-      });
+      mainWindow = createWindow();
     }
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// Closing the window is "hide to tray", not "quit" - except on macOS, where the
+// app lives in the menu bar anyway, and except when the tray failed to appear,
+// where keeping the process alive would leave it running with no window, no
+// icon and no way to quit it.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform === "darwin") return;
+  if (terminating || !trayReady) app.quit();
 });
 
 // In this file you can include the rest of your app"s specific main process
 // code. You can also put them in separate files and require them here.
 
+// The dump stream buffers, and a quit would otherwise drop the tail - which is
+// the part worth reading after a session that misbehaved.
+app.on("will-quit", closeDump);
+
 app.on("second-instance", () => {
+  // The lock is taken at module load, so this can arrive before ready - and
+  // new BrowserWindow() throws outright until then.
+  if (!app.isReady()) return;
   showMainWindow();
+});
+
+// An open Firestore stream holds handles that would outlive the quit. Setting
+// terminating here, first and synchronously, closes off every daemon.start()
+// call in this file before listener.stop()'s queued teardown - which signals
+// its demote ahead of its own awaits - can reach the setHealthy handler above.
+app.on("before-quit", () => {
+  terminating = true;
+  listenerRestart.cancel();
+  daemon.stop();
+  void listener.stop();
 });
 
 ipcMain.on("show-main-window", showMainWindow);

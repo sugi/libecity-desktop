@@ -2,81 +2,25 @@
 // It has the same sandbox as a Chrome extension.
 
 import { ipcRenderer } from "electron";
+import { extractSession } from "./session-extract";
+import { SessionWatch } from "./session-watch";
 
-type NotificationItem = { title: string; body: string; date: Date };
-
-const getNotifications = (): NotificationItem[] => {
-  const container = document.querySelector("#notificationMenu ul");
-  if (!container) return [];
-  return Array.from(
-    container.querySelectorAll(":not(.is_noInfo).nav-item")
-  ).map((i) => {
-    return {
-      title: i.querySelector(".notificationTitle")?.textContent ?? "",
-      body: i.querySelector(".notificationDetail")?.textContent ?? "",
-      date: new Date(
-        Array.from(i.querySelector("time")?.childNodes ?? [])
-          .map((n) => n.textContent)
-          .join(" ")
-      ),
-    };
-  });
-};
-
-const startNotificationObserver = () => {
-  let lastNotifiedItems: NotificationItem[] = [];
-
-  const notifyNewNotifications = () => {
-    const notified: NotificationItem[] = [];
-    if (!document.querySelector(".notificationIcon.is_notifice")) {
-      if (document.querySelector(".chat_item .count_unread.rounded-circle")) {
-        ipcRenderer.send("icon-new-message");
-        return;
-      }
-      ipcRenderer.send("icon-default");
-      return;
-    }
-    ipcRenderer.send("icon-notification");
-    const items = getNotifications();
-    if (
-      !items.length ||
-      (lastNotifiedItems.length &&
-        JSON.stringify(items[0]) ===
-          JSON.stringify(lastNotifiedItems[lastNotifiedItems.length - 1]))
-    )
-      return;
-    items
-      .concat()
-      .reverse()
-      .filter(
-        (i) =>
-          !lastNotifiedItems.length ||
-          (lastNotifiedItems[lastNotifiedItems.length - 1].date <= i.date &&
-            !lastNotifiedItems.find(
-              (l) => JSON.stringify(i) === JSON.stringify(l)
-            ))
-      )
-      .forEach((i) => {
-        new Notification(i.title, {
-          body: i.body,
-        }).addEventListener("click", () =>
-          ipcRenderer.send("show-main-window")
-        );
-        notified.push(i);
-      });
-    lastNotifiedItems = notified;
+// Hand the Firebase auth session to main after login so the notification
+// daemon can run on its own, and tell main when it goes away so the stored
+// refresh token does not outlive the account it belongs to. Poll because the
+// SDK writes to IndexedDB some time after DOMContentLoaded, and the token is
+// refreshed periodically.
+const startSessionPoll = () => {
+  const watch = new SessionWatch();
+  const poll = async () => {
+    const action = watch.observe(await extractSession());
+    if (action.kind === "session") ipcRenderer.send("auth-session", action.session);
+    else if (action.kind === "signed-out") ipcRenderer.send("auth-signed-out");
   };
-  setTimeout(notifyNewNotifications, 5000);
-  setInterval(notifyNewNotifications, 30 * 1000);
-};
-
-const injectCSS = () => {
-  const style = document.createElement('STYLE');
-  style.textContent = '#notificationMenu { max-height: 90vh; }'
-  document.head.appendChild(style);
+  void poll();
+  setInterval(() => void poll(), 15 * 1000);
 };
 
 window.addEventListener("DOMContentLoaded", () => {
-  startNotificationObserver();
-  injectCSS();
+  startSessionPoll();
 });

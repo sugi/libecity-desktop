@@ -24,6 +24,33 @@ npm start
 
 Note: If you're using Linux Bash for Windows, [see this guide](https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/) or use `node` from the command prompt.
 
+## Capturing API traffic
+
+libecity's API is undocumented, so the app can capture its own requests to help
+diagnose a break (a changed endpoint, a changed auth flow). The capture is
+**off by default** in both development and installed builds: it attaches a
+Chrome DevTools Protocol debugger, which claims the slot DevTools itself needs,
+and it records chat traffic.
+
+```bash
+# development
+LIBECITY_DUMP=1 npm start
+# installed build
+libecity-desktop --dump-api
+```
+
+Captures land in `<userData>/dump/session-<timestamp>.jsonl`, one per run, and
+are never deleted automatically - remove them yourself when you are done.
+
+Credentials (Authorization headers, cookies, JWTs, Firebase refresh tokens,
+`gsessionid`) are redacted as they are written. This is best effort and it does
+**not** make a capture publishable: bodies still contain chat content and
+account data. To keep credentials intact - needed only when the auth flow
+itself is what is broken - use `--dump-secrets` / `LIBECITY_DUMP_SECRETS=1`,
+which implies `--dump-api`.
+
+`node scripts/analyze-dump.mjs <file>` summarises a capture into a report.
+
 ## Resources for Learning Electron
 
 - [electronjs.org/docs](https://electronjs.org/docs) - all of Electron's documentation
