@@ -28,6 +28,7 @@ await esbuild.build({
       export { redact } from "./src/redact.ts";
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
+      export { classifyUrl } from "./src/url-policy.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -64,6 +65,7 @@ const {
   noticeTitle,
   noticeBody,
   notificationTitle,
+  classifyUrl,
 } = mod;
 
 let failures = 0;
@@ -340,6 +342,23 @@ eq("counts: notice outranks message", stateFromCounts({ message: 5, live: 1 }), 
 eq("counts: total sums every category", totalFromCounts({ message: 2, dm: 3, live: 0 }), 5);
 eq("counts: total of empty -> 0", totalFromCounts({}), 0);
 eq("counts: negatives are ignored", totalFromCounts({ message: -1, dm: 2 }), 2);
+
+// --- classifyUrl ---
+eq("url policy: our site is internal", classifyUrl("https://libecity.com/room_list?room_id=R1"), "internal");
+eq("url policy: our site bare root is internal", classifyUrl("https://libecity.com/"), "internal");
+eq("url policy: http on our host is external, not internal", classifyUrl("http://libecity.com/x"), "external");
+eq("url policy: a lookalike host is external", classifyUrl("https://libecity.com.evil.test/x"), "external");
+eq("url policy: a subdomain is external", classifyUrl("https://api.libecity.com/x"), "external");
+eq("url policy: ordinary https is external", classifyUrl("https://www.youtube.com/live/x"), "external");
+eq("url policy: ordinary http is external", classifyUrl("http://example.test/x"), "external");
+eq("url policy: httpsanything scheme is rejected", classifyUrl("httpsanything:evil"), "reject");
+eq("url policy: http-calculator scheme is rejected", classifyUrl("http-calculator:x"), "reject");
+eq("url policy: httpx scheme is rejected", classifyUrl("httpx:foo"), "reject");
+eq("url policy: javascript is rejected", classifyUrl("javascript:alert(1)"), "reject");
+eq("url policy: file is rejected", classifyUrl("file:///etc/passwd"), "reject");
+eq("url policy: unparseable is rejected", classifyUrl("not a url"), "reject");
+eq("url policy: empty is rejected", classifyUrl(""), "reject");
+eq("url policy: undefined is rejected", classifyUrl(undefined), "reject");
 
 fs.unlinkSync(outfile);
 if (failures) {

@@ -1,3 +1,5 @@
+import { classifyUrl, SITE_ORIGIN } from "./url-policy";
+
 // A notice document from users/{uid}/notices. Documents written years apart
 // carry different field sets, so everything past the type is optional.
 export type NoticeTimestamp = { toDate: () => Date };
@@ -30,8 +32,6 @@ export type Notice = {
   point_expire_at_time?: NoticeTimestamp;
   fiveforce_id?: string;
 };
-
-const SITE = "https://libecity.com";
 
 export function noticeDate(n: Notice): Date | undefined {
   try {
@@ -124,7 +124,17 @@ function noticePath(n: Notice): string | undefined {
 export function noticeUrl(n: Notice): string | undefined {
   const path = noticePath(n);
   if (!path) return undefined;
-  return path.startsWith("http") ? path : `${SITE}${path}`;
+  if (classifyUrl(path) !== "reject") return path;
+  // Rejected. A relative path (from every switch branch above) never parses
+  // as a URL at all, so it's still safe to root under our own site. Anything
+  // that *does* parse - an other_url carrying a scheme the policy disallows,
+  // e.g. javascript: - must not be stitched onto https://libecity.com.
+  try {
+    new URL(path);
+    return undefined;
+  } catch {
+    return `${SITE_ORIGIN}${path}`;
+  }
 }
 
 // noticeTypeCategoryMap from the site bundle, inverted. The categories are the

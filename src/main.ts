@@ -4,9 +4,11 @@ import windowStateKeeper from "electron-window-state";
 import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-auth";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
+import { log } from "./log";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 import { NoticeListener } from "./notice-listener";
 import { renderTrayIcon } from "./tray-icon";
+import { classifyUrl } from "./url-policy";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
 // newer than its own, so hopping between Electron versions during development
@@ -37,24 +39,26 @@ const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
-// Notifications carry a target. Same policy as setWindowOpenHandler: our own
-// site stays in the window, anything else goes to the browser.
+// Notifications carry a target.
 const openUrl = (url?: string) => {
-  if (!url || !url.startsWith("https://libecity.com/")) {
-    if (url?.startsWith("http")) {
-      void shell.openExternal(url);
+  switch (classifyUrl(url)) {
+    case "internal":
+      if (typeof mainWindow === "undefined") {
+        mainWindow = createWindow(url);
+        return;
+      }
+      mainWindow.show();
+      mainWindow.focus();
+      void mainWindow.loadURL(url as string);
       return;
-    }
-    showMainWindow();
-    return;
+    case "external":
+      void shell.openExternal(url as string);
+      return;
+    case "reject":
+      log("open-url-rejected", { url });
+      showMainWindow();
+      return;
   }
-  if (typeof mainWindow === "undefined") {
-    mainWindow = createWindow(url);
-    return;
-  }
-  mainWindow.show();
-  mainWindow.focus();
-  void mainWindow.loadURL(url);
 };
 
 // The daemon polls; only touch the tray when the picture would change.
@@ -119,10 +123,15 @@ function createWindow(
   win.loadURL(url);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://libecity.com/")) {
-      win.loadURL(url);
-    } else if (url.startsWith("http://") || url.startsWith("https://")) {
-      shell.openExternal(url);
+    switch (classifyUrl(url)) {
+      case "internal":
+        win.loadURL(url);
+        break;
+      case "external":
+        shell.openExternal(url);
+        break;
+      case "reject":
+        break;
     }
     return { action: "deny" };
   });
