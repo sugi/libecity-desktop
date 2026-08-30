@@ -113,17 +113,26 @@ export class NoticeListener {
   // waits on releaseAuth(), which queues behind any in-flight restoreAuth()
   // with no timeout, and the app must not go that long without notifications.
   // The flag keeps one failure to one signal when both snapshots error at once.
+  // stop() is called first, not after the handler: its enqueue is synchronous
+  // and blocks on nothing, so onFailure() still fires in the same turn with
+  // nothing awaited before it, but registering first puts this teardown ahead
+  // of any stop() a synchronously-retrying handler triggers via start() -
+  // that ordering is what the comment on stop() depends on.
   private fail(at: string, err: unknown): void {
-    log("listener-error", { at, error: String(err) });
+    try {
+      log("listener-error", { at, error: String(err) });
+    } catch {
+      // log() must not be able to block the fallback signal below.
+    }
     if (this.failed) return;
     this.failed = true;
     this.started = false;
+    void this.stop();
     try {
       this.handlers.onFailure();
     } catch (handlerErr) {
       log("listener-error", { at: "on-failure", error: String(handlerErr) });
     }
-    void this.stop();
   }
 
   private watchTray(db: Firestore, uid: string): void {
