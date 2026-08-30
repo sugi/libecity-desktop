@@ -37,6 +37,7 @@ await esbuild.build({
       export { SeededPersistence, seedPersistence, clearSeeded } from "./src/seeded-persistence.ts";
       export { RestartScheduler } from "./src/restart-scheduler.ts";
       export { SessionWatch } from "./src/session-watch.ts";
+      export { classifyUrl, mayNavigate } from "./src/url-policy.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -80,6 +81,7 @@ const {
   seedPersistence,
   clearSeeded,
   SessionWatch,
+  mayNavigate,
 } = mod;
 
 let failures = 0;
@@ -546,6 +548,17 @@ eq("redact: values past the depth limit are masked, not passed through",
   eq("watch: a sign-out is reported once", w.observe(out).kind, "none");
   eq("watch: signing back in with the old token is reported again", w.observe(sess("b")).kind, "session");
 }
+// --- mayNavigate: top-level navigation policy ---
+eq("nav: the site itself may navigate", mayNavigate("https://libecity.com/room_list"), true);
+eq("nav: a site subdomain may navigate", mayNavigate("https://library.libecity.com/x"), true);
+eq("nav: the api subdomain may navigate", mayNavigate("https://api.libecity.com/x"), true);
+eq("nav: a lookalike host may not", mayNavigate("https://libecity.com.evil.test/x"), false);
+eq("nav: a suffix-match host may not", mayNavigate("https://evillibecity.com/x"), false);
+eq("nav: userinfo does not launder the host", mayNavigate("https://libecity.com@evil.test/x"), false);
+eq("nav: plain http may not", mayNavigate("http://libecity.com/x"), false);
+eq("nav: a foreign https host may not", mayNavigate("https://www.youtube.com/x"), false);
+eq("nav: a non-http scheme may not", mayNavigate("javascript:alert(1)"), false);
+eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
 
 fs.unlinkSync(outfile);
 if (failures) {

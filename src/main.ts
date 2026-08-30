@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, session, shell, Tray } from "electron";
 import * as path from "path";
 import windowStateKeeper from "electron-window-state";
+import squirrelStartup from "electron-squirrel-startup";
 import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-auth";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
@@ -8,7 +9,7 @@ import { log } from "./log";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 import { NoticeListener } from "./notice-listener";
 import { renderTrayIcon } from "./tray-icon";
-import { classifyUrl } from "./url-policy";
+import { classifyUrl, mayNavigate } from "./url-policy";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
 // newer than its own, so hopping between Electron versions during development
@@ -26,6 +27,16 @@ if (!app.isPackaged) {
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let trayReady = false;
+
+// Squirrel runs the exe with --squirrel-install/--squirrel-updated to have it
+// create and migrate shortcuts, then exit. Booting the real app instead leaves
+// the install with no shortcuts, and on update the second process would lose
+// the lock below and quit before the migration ran.
+if (squirrelStartup) {
+  terminating = true;
+  app.quit();
+}
 
 if (!app.requestSingleInstanceLock()) {
   terminating = true;
@@ -175,6 +186,19 @@ function createWindow(
     return { action: "deny" };
   });
 
+  // setWindowOpenHandler only covers window.open and target=_blank. A plain
+  // link, location.href, a form post or a server redirect moves this window
+  // itself, and without this the app would keep its title and its preload
+  // while showing somebody else's page.
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    if (mayNavigate(url)) return;
+    event.preventDefault();
+    log("navigation-blocked", { url });
+    openUrl(url);
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
+
   win.on("close", () => {
     mainWindow = undefined;
   });
@@ -213,6 +237,24 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
 app.whenReady().then(() => {
   if (terminating) return;
 
+  // The window renders a site we do not control. Nothing it can ask for is
+  // needed by the chat, except pasting and going fullscreen on a video; the
+  // desktop notifications come from the main process, not from the page.
+  // Denials are logged so a feature that breaks names the permission it wants.
+  const ALLOWED_PERMISSIONS = new Set([
+    "clipboard-read",
+    "clipboard-sanitized-write",
+    "fullscreen",
+  ]);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    const allowed = ALLOWED_PERMISSIONS.has(permission);
+    if (!allowed) log("permission-denied", { permission });
+    callback(allowed);
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED_PERMISSIONS.has(permission)
+  );
+
   const dumpPath = openDump();
   if (dumpPath) console.log(`[dump] writing API traffic to ${dumpPath}`);
 
@@ -238,6 +280,7 @@ app.whenReady().then(() => {
 
     tray.setContextMenu(contextMenu);
     tray.addListener("click", showMainWindow);
+    trayReady = true;
     console.log(`[tray] created on ${process.platform}`);
   } catch (err) {
     console.error("[tray] failed to create:", err);
@@ -257,13 +300,13 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// Closing the window is "hide to tray", not "quit" - except on macOS, where the
+// app lives in the menu bar anyway, and except when the tray failed to appear,
+// where keeping the process alive would leave it running with no window, no
+// icon and no way to quit it.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" && terminating) {
-    app.quit();
-  }
+  if (process.platform === "darwin") return;
+  if (terminating || !trayReady) app.quit();
 });
 
 // In this file you can include the rest of your app"s specific main process
@@ -274,6 +317,9 @@ app.on("window-all-closed", () => {
 app.on("will-quit", closeDump);
 
 app.on("second-instance", () => {
+  // The lock is taken at module load, so this can arrive before ready - and
+  // new BrowserWindow() throws outright until then.
+  if (!app.isReady()) return;
   showMainWindow();
 });
 
