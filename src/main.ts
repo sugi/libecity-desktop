@@ -4,10 +4,11 @@ import windowStateKeeper from "electron-window-state";
 import squirrelStartup from "electron-squirrel-startup";
 import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-auth";
-import { loadRefreshToken, saveRefreshToken } from "./session-store";
+import { clearRefreshToken, loadRefreshToken, saveRefreshToken } from "./session-store";
 import { log } from "./log";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 import { NoticeListener } from "./notice-listener";
+import { RestartScheduler } from "./restart-scheduler";
 import { renderTrayIcon } from "./tray-icon";
 import { classifyUrl, mayNavigate } from "./url-policy";
 
@@ -101,6 +102,23 @@ const daemon = new NotificationDaemon({ setTray, openUrl });
 // startup, a terminal error and a connection that merely went quiet are all
 // the same case here. An outage that never resolves therefore polls forever,
 // which is the degradation we want.
+// Nothing else retries the listener: its only other entry point is the
+// auth-session IPC, which needs an open window, and the whole point of the
+// listener is running without one. One transient failure at boot would
+// otherwise leave the app on the 15-minute poll for the life of the process.
+const listenerRestart = new RestartScheduler({
+  attempt: () => {
+    if (terminating) return Promise.resolve(true);
+    const token = loadRefreshToken();
+    if (!token) {
+      log("listener-retry-skipped", { reason: "no-refresh-token" });
+      return Promise.resolve(true);
+    }
+    return listener.start(token);
+  },
+  onSchedule: (delayMs) => log("listener-retry-scheduled", { delayMs }),
+});
+
 let listenerHealthy = false;
 const listener = new NoticeListener({
   setTray,
@@ -109,6 +127,7 @@ const listener = new NoticeListener({
     if (healthy === listenerHealthy) return;
     listenerHealthy = healthy;
     if (healthy) {
+      listenerRestart.cancel();
       daemon.stop();
       return;
     }
@@ -122,6 +141,7 @@ const listener = new NoticeListener({
     } else {
       log("poll-fallback-skipped", { reason: "no-refresh-token" });
     }
+    listenerRestart.schedule();
   },
 });
 
@@ -141,7 +161,10 @@ const startNotifications = (refreshToken: string) => {
   daemon.start(refreshToken);
   listenerToken = refreshToken;
   void listener.start(refreshToken).then((ok) => {
-    if (!ok) log("listener-start-failed");
+    if (!ok) {
+      log("listener-start-failed");
+      listenerRestart.schedule();
+    }
   });
 };
 
@@ -232,6 +255,18 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
   // nothing else retries a failed start on its own) still goes through.
   if (session.refreshToken === listenerToken && listener.running) return;
   startNotifications(session.refreshToken);
+});
+
+// Signing out in the page does not revoke the refresh token server-side, so
+// without this the daemon would go on reading the account the user believes
+// they left - on a shared machine, indefinitely.
+ipcMain.on("auth-signed-out", () => {
+  log("auth-signed-out");
+  listenerToken = undefined;
+  listenerRestart.cancel();
+  daemon.stop();
+  void listener.stop();
+  clearRefreshToken();
 });
 
 app.whenReady().then(() => {
@@ -329,6 +364,7 @@ app.on("second-instance", () => {
 // its demote ahead of its own awaits - can reach the setHealthy handler above.
 app.on("before-quit", () => {
   terminating = true;
+  listenerRestart.cancel();
   daemon.stop();
   void listener.stop();
 });
