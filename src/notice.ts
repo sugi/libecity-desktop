@@ -43,10 +43,8 @@ export function noticeDate(n: Notice): Date | undefined {
 
 const tweetId = (path?: string) => (path ?? "").replace("tweets/", "");
 
-// Ported from the site's own Notice.url getter - see
-// docs/reference/libecity-notice-model.js. Unknown types return undefined
-// rather than throwing, so a type added on the server cannot break the
-// listener.
+// Ported from the site's own Notice.url getter. Unknown types return undefined
+// rather than throwing, so a type added on the server cannot break the listener.
 function noticePath(n: Notice): string | undefined {
   const room = n.room_id ?? "";
   switch (n.type) {
@@ -124,17 +122,15 @@ function noticePath(n: Notice): string | undefined {
 export function noticeUrl(n: Notice): string | undefined {
   const path = noticePath(n);
   if (!path) return undefined;
+  // An absolute URL - only ever from other_url - stands or falls on its own.
   if (classifyUrl(path) !== "reject") return path;
-  // Rejected. A relative path (from every switch branch above) never parses
-  // as a URL at all, so it's still safe to root under our own site. Anything
-  // that *does* parse - an other_url carrying a scheme the policy disallows,
-  // e.g. javascript: - must not be stitched onto https://libecity.com.
-  try {
-    new URL(path);
-    return undefined;
-  } catch {
-    return `${SITE_ORIGIN}${path}`;
-  }
+  // Rejected: either a relative path from the switch above, or an other_url
+  // the policy will not take. Only a rooted path may be joined to the site.
+  // "evil.example/x" is not a path, and concatenating it invents a host;
+  // "//evil.example/x" parses as one. Both have to go.
+  if (!path.startsWith("/") || path.startsWith("//")) return undefined;
+  const joined = `${SITE_ORIGIN}${path}`;
+  return classifyUrl(joined) === "internal" ? joined : undefined;
 }
 
 // noticeTypeCategoryMap from the site bundle, inverted. The categories are the
