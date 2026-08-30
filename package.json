@@ -11,6 +11,7 @@
     "electron-forge": "electron-forge",
     "package": "npm run clean && npm run build && electron-forge package",
     "make": "npm run clean && npm run build && electron-forge make",
+    "make:local": "npm run clean && npm run build && electron-forge make --targets @electron-forge/maker-deb,@electron-forge/maker-zip",
     "make:all": "npm run clean && npm run build && electron-forge make -a x64,arm64 -p darwin && electron-forge make -a x64,arm64 -p linux && electron-forge make -a x64 -p win32"
   },
   "main": "dist/main.js",
