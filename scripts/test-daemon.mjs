@@ -25,6 +25,7 @@ await esbuild.build({
       export { parseCategories } from "./src/libecity-api.ts";
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
       export { redact } from "./src/redact.ts";
+      export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -45,8 +46,18 @@ await esbuild.build({
 });
 
 const mod = await import(pathToFileURL(outfile).href);
-const { computeState, diffNotifications, unreadTotal, parseCategories, badgeText, drawBadge, redact } =
-  mod;
+const {
+  computeState,
+  diffNotifications,
+  unreadTotal,
+  parseCategories,
+  badgeText,
+  drawBadge,
+  redact,
+  noticeUrl,
+  noticeCategory,
+  capNotices,
+} = mod;
 
 let failures = 0;
 const eq = (name, got, want) => {
@@ -183,6 +194,69 @@ eq("redact: hasRefreshToken is not a secret", redact({ hasRefreshToken: true }).
 eq("redact: last_created_at is not a secret", redact({ last_created_at: "2026-01-01" }).last_created_at, "2026-01-01");
 eq("redact: walks arrays and nesting", redact({ a: [{ idToken: "zz" }] }).a[0].idToken, "<redacted len=2>");
 eq("redact: leaves primitives alone", redact(null), null);
+
+// --- noticeUrl ---
+const N = (type, fields = {}) => ({ documentId: `${type}-1`, type, ...fields });
+const SITE = "https://libecity.com";
+eq("url: mention -> room + comment",
+  noticeUrl(N("mention", { room_id: "R1", message_id: "M1" })),
+  `${SITE}/room_list?room_id=R1&comment_id=M1`);
+eq("url: to_all -> room + comment",
+  noticeUrl(N("to_all", { room_id: "R1", message_id: "M1" })),
+  `${SITE}/room_list?room_id=R1&comment_id=M1`);
+eq("url: dm -> room only",
+  noticeUrl(N("dm", { room_id: "R2" })), `${SITE}/room_list?room_id=R2`);
+eq("url: followed -> profile",
+  noticeUrl(N("followed", { follower_uid: "U9" })), `${SITE}/user_profile/U9`);
+eq("url: event with both ids",
+  noticeUrl(N("event_calendar", { event_id: "E1", event_host_id: "H1" })),
+  `${SITE}/mypage/event_calendar?event=H1-E1`);
+eq("url: event missing an id falls back to the page",
+  noticeUrl(N("event_calendar", { event_id: "E1" })), `${SITE}/mypage/event_calendar`);
+eq("url: reaction_tweet prefers tweet_id",
+  noticeUrl(N("reaction_tweet", { tweet_id: "T1", reply_tweet_id: "R1" })),
+  `${SITE}/tweet/my?reaction_tweet_id=T1`);
+eq("url: reaction_tweet falls back to the reply",
+  noticeUrl(N("reaction_tweet", { reply_tweet_id: "R1" })),
+  `${SITE}/tweet/my?reaction_reply_tweet_id=R1`);
+eq("url: reply_tweet strips the tweets/ prefix",
+  noticeUrl(N("reply_tweet", { parent_tweet_path: "tweets/P1" })),
+  `${SITE}/tweet/my?reply_tweet_id=P1`);
+eq("url: point_reaction with a key",
+  noticeUrl(N("point_reaction", { point_key: "K1" })),
+  `${SITE}/mypage/point_histories?point_key=K1`);
+eq("url: point_reaction without a key still lands on the page",
+  noticeUrl(N("point_reaction")), `${SITE}/mypage/point_histories`);
+eq("url: point_receive -> points",
+  noticeUrl(N("point_receive")), `${SITE}/mypage/points`);
+eq("url: live type passes other_url through untouched",
+  noticeUrl(N("beginners_live", { other_url: "https://www.youtube.com/live/x" })),
+  "https://www.youtube.com/live/x");
+eq("url: unknown type with no other_url -> undefined",
+  noticeUrl(N("something_new")), undefined);
+eq("url: a document with no fields at all does not throw",
+  noticeUrl({ documentId: "d", type: "mention" }),
+  `${SITE}/room_list?room_id=&comment_id=`);
+
+// --- noticeCategory ---
+eq("category: mention -> message", noticeCategory("mention"), "message");
+eq("category: official_dm_mention -> official_dm", noticeCategory("official_dm_mention"), "official_dm");
+eq("category: beginners_live -> live", noticeCategory("beginners_live"), "live");
+eq("category: unknown -> undefined", noticeCategory("nope"), undefined);
+
+// --- capNotices ---
+const at = (iso) => ({ toDate: () => new Date(iso) });
+const stamped = (n, iso) => ({ documentId: `d${n}`, type: "mention", created_at: at(iso) });
+const five = [1, 2, 3, 4, 5].map((i) => stamped(i, `2026-01-0${i}T00:00:00Z`));
+eq("cap: under the cap fires everything", capNotices(five, 5).fire.length, 5);
+eq("cap: under the cap collapses nothing", capNotices(five, 5).collapsed, 0);
+const seven = [1, 2, 3, 4, 5, 6, 7].map((i) => stamped(i, `2026-01-0${i}T00:00:00Z`));
+eq("cap: over the cap fires the cap", capNotices(seven, 5).fire.length, 5);
+eq("cap: over the cap collapses the rest", capNotices(seven, 5).collapsed, 2);
+eq("cap: keeps the newest", capNotices(seven, 5).fire.map((n) => n.documentId), ["d3", "d4", "d5", "d6", "d7"]);
+eq("cap: fires oldest first", capNotices(seven, 5).fire[0].documentId, "d3");
+eq("cap: sorts unordered input", capNotices([stamped(2, "2026-01-02T00:00:00Z"), stamped(1, "2026-01-01T00:00:00Z")], 5).fire.map((n) => n.documentId), ["d1", "d2"]);
+eq("cap: undated notices do not throw", capNotices([{ documentId: "x", type: "mention" }], 5).fire.length, 1);
 
 fs.unlinkSync(outfile);
 if (failures) {
