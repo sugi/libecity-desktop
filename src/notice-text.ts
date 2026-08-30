@@ -1,6 +1,8 @@
 import { noticeCategory, noticeDate, type Notice } from "./notice";
 
-// Category labels, as the bell shows them.
+// Category labels, as the bell shows them - except recruit and other, this
+// project's own coinages, because the site's bundle had no findable label
+// for either.
 export const TYPE_LABELS: Record<string, string> = {
   message: "メッセージ",
   tweet: "つぶやき",
@@ -93,7 +95,8 @@ const expiry = (n: Notice) => {
 };
 
 // Ported from the site's Notice.title getter. Where it throws for an unknown
-// type, this falls back, because the daemon must not die over a new one.
+// type, this falls back to "新しいお知らせがあります" - also our own coinage,
+// not the site's, because the daemon must not die over a new one.
 export function noticeTitle(n: Notice): string {
   if (n.original_title) return n.original_title;
   const who = n.user_name ?? "";

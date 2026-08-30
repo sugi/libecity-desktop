@@ -1,7 +1,8 @@
 // Runs in the preload (renderer) context, where the libecity.com-origin
 // IndexedDB that the Firebase Auth SDK writes to is reachable.
 
-const API_KEY = "AIzaSyDxUFU2BiEQ1By3EKL8DL6IxoWgzutmR18";
+import { API_KEY } from "./firebase-config";
+
 const DB_NAME = "firebaseLocalStorageDb";
 const STORE = "firebaseLocalStorage";
 const KEY = `firebase:authUser:${API_KEY}:[DEFAULT]`;

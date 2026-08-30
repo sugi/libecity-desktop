@@ -1,11 +1,8 @@
 import { deleteApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { initializeAuth, type Persistence } from "firebase/auth";
 import { refreshIdToken, type RefreshResult } from "./firebase-auth";
+import { API_KEY, PROJECT_ID } from "./firebase-config";
 import { log } from "./log";
-
-// Published by the site itself at https://libecity.com/swenv.js
-const API_KEY = "AIzaSyDxUFU2BiEQ1By3EKL8DL6IxoWgzutmR18";
-const PROJECT_ID = "production-b8884";
 
 export type FirebaseSession = { app: FirebaseApp; uid: string };
 
@@ -62,7 +59,9 @@ function refreshErrorReason(body: unknown): string | undefined {
 
 async function releaseAuthImpl(): Promise<void> {
   for (const app of getApps()) {
-    await deleteApp(app).catch(() => undefined);
+    await deleteApp(app).catch((err) =>
+      log("listener-auth-error", { at: "delete-app", error: String(err) })
+    );
   }
   seededStore.clear();
 }

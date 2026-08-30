@@ -360,6 +360,34 @@ eq("url policy: unparseable is rejected", classifyUrl("not a url"), "reject");
 eq("url policy: empty is rejected", classifyUrl(""), "reject");
 eq("url policy: undefined is rejected", classifyUrl(undefined), "reject");
 
+// --- gaps found in review ---
+eq("cap: default cap is five", capNotices([1,2,3,4,5,6,7].map((i) => stamped(i, `2026-01-0${i}T00:00:00Z`))).fire.length, 5);
+eq("url: reply_tweet without a parent path does not throw", noticeUrl(N("reply_tweet")), `${SITE}/tweet/my?reply_tweet_id=`);
+eq("url: reply_tweet_reply without a parent path does not throw", noticeUrl(N("reply_tweet_reply", { reply_tweet_id: "R1" })), `${SITE}/tweet/my?reply_tweet_reply_parent_id=&reply_tweet_id=R1`);
+eq("title: delete warning adds thirty days",
+  noticeTitle({ documentId: "d", type: "usercommunity_delete_warning", room_name: "勉強部屋", created_at: { toDate: () => new Date("2026-01-15T00:00:00Z") } }),
+  "【削除予告】勉強部屋は、2026年02月14日までに新規投稿がないと自動で削除されます");
+eq("title: delete warning rolls over a month end",
+  noticeTitle({ documentId: "d", type: "usercommunity_delete_warning", room_name: "部屋", created_at: { toDate: () => new Date("2026-12-20T00:00:00Z") } }),
+  "【削除予告】部屋は、2027年01月19日までに新規投稿がないと自動で削除されます");
+eq("title: exchange failure carries the expiry",
+  noticeTitle({ documentId: "d", type: "point_exchange_failed", point_expire_at_time: { toDate: () => new Date("2026-03-05T00:00:00Z") } }),
+  "【換金失敗】口座情報に誤りがあったため、ポイントを返却しました（有効期限：2026年3月5日）");
+eq("title: exchange failure without an expiry is still a sentence",
+  noticeTitle({ documentId: "d", type: "point_exchange_failed_account_name_incorrect" }),
+  "【換金失敗】口座名義に誤りがあったため、ポイントを返却しました（有効期限：）");
+
+// --- url policy: the branch Task 1 exists to protect ---
+eq("url: a hostile scheme in other_url yields no target", noticeUrl(N("beginners_live", { other_url: "javascript:alert(1)" })), undefined);
+eq("url: an unknown scheme in other_url yields no target", noticeUrl(N("recruit", { other_url: "httpx:foo" })), undefined);
+eq("url: a file scheme in other_url yields no target", noticeUrl(N("other_live", { other_url: "file:///etc/passwd" })), undefined);
+eq("url policy: a trailing-dot host is external", classifyUrl("https://libecity.com."), "external");
+eq("url policy: an explicit default port is still internal", classifyUrl("https://libecity.com:443/x"), "internal");
+eq("url policy: a non-default port is external", classifyUrl("https://libecity.com:8443/x"), "external");
+eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.COM/x"), "internal");
+// userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
+eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
+
 fs.unlinkSync(outfile);
 if (failures) {
   console.error(`\n${failures} test(s) failed`);

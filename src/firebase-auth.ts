@@ -1,5 +1,4 @@
-// Published by the site itself at https://libecity.com/swenv.js
-const API_KEY = "AIzaSyDxUFU2BiEQ1By3EKL8DL6IxoWgzutmR18";
+import { API_KEY } from "./firebase-config";
 
 const SECURETOKEN = `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`;
 
