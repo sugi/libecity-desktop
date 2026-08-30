@@ -34,6 +34,7 @@ await esbuild.build({
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
       export { classifyUrl } from "./src/url-policy.ts";
+      export { SeededPersistence, seedPersistence, clearSeeded } from "./src/seeded-persistence.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -71,6 +72,9 @@ const {
   noticeBody,
   notificationTitle,
   classifyUrl,
+  SeededPersistence,
+  seedPersistence,
+  clearSeeded,
 } = mod;
 
 let failures = 0;
@@ -393,6 +397,28 @@ eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.CO
 // userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
+
+// --- seeded persistence: the shim handed to Firebase Auth ---
+{
+  const first = seedPersistence("k", { a: 1 });
+  const store = new SeededPersistence();
+  eq("persistence: it reports itself as local", store.type, "LOCAL");
+  eq("persistence: it is always available", await store._isAvailable(), true);
+  eq("persistence: the seeded key reads back", await store._get("k"), { a: 1 });
+  eq("persistence: an unseeded key reads null", await store._get("nope"), null);
+  await store._set("k2", { b: 2 });
+  eq("persistence: a written key reads back", await store._get("k2"), { b: 2 });
+  await store._remove("k2");
+  eq("persistence: a removed key reads null", await store._get("k2"), null);
+  const second = seedPersistence("k3", { c: 3 });
+  eq("persistence: seeding replaces the previous contents", await store._get("k"), null);
+  eq("persistence: seeding again reads back the new key", await store._get("k3"), { c: 3 });
+  // The SDK caches one persistence instance per class object with no eviction,
+  // so handing out a fresh class per restore would leak one per restore.
+  eq("persistence: exactly one class object is ever handed out", first === second, true);
+  clearSeeded();
+  eq("persistence: clearing empties the store", await store._get("k3"), null);
+}
 
 fs.unlinkSync(outfile);
 if (failures) {
