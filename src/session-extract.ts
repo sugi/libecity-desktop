@@ -43,7 +43,8 @@ const openDb = (): Promise<IDBDatabase | undefined> =>
     };
   });
 
-const readEntry = (db: IDBDatabase): Promise<StoredAuthUser | undefined> =>
+// undefined: the row could not be read. null: the store was read and holds no entry.
+const readEntry = (db: IDBDatabase): Promise<StoredAuthUser | null | undefined> =>
   new Promise((resolve) => {
     let tx: IDBTransaction;
     try {
@@ -55,27 +56,39 @@ const readEntry = (db: IDBDatabase): Promise<StoredAuthUser | undefined> =>
     const get = tx.objectStore(STORE).get(KEY);
     get.onsuccess = () => {
       const row = get.result as { value?: StoredAuthUser } | StoredAuthUser | undefined;
-      if (!row) return resolve(undefined);
+      if (!row) return resolve(null);
       // firebase wraps the payload as { fbase_key, value }
-      const value = (row as { value?: StoredAuthUser }).value ?? (row as StoredAuthUser);
-      resolve(value);
+      resolve((row as { value?: StoredAuthUser }).value ?? (row as StoredAuthUser));
     };
     get.onerror = () => resolve(undefined);
   });
 
-export async function extractSession(): Promise<ExtractedSession | undefined> {
+export type SessionProbe =
+  | { state: "session"; session: ExtractedSession }
+  | { state: "signed-out" }
+  | { state: "unknown" };
+
+// "unknown" and "signed-out" have to be distinguishable: the SDK writes the
+// entry some time after DOMContentLoaded, so an absent entry early in a page's
+// life is not a sign-out, and treating it as one would drop a live session.
+export async function extractSession(): Promise<SessionProbe> {
   const db = await openDb();
-  if (!db) return undefined;
+  if (!db) return { state: "unknown" };
   try {
     const entry = await readEntry(db);
-    const tm = entry?.stsTokenManager;
-    if (!entry?.uid || !tm?.refreshToken) return undefined;
+    if (entry === undefined) return { state: "unknown" };
+    if (entry === null) return { state: "signed-out" };
+    const tm = entry.stsTokenManager;
+    if (!entry.uid || !tm?.refreshToken) return { state: "signed-out" };
     return {
-      uid: entry.uid,
-      email: entry.email,
-      accessToken: tm.accessToken ?? "",
-      refreshToken: tm.refreshToken,
-      expirationTime: tm.expirationTime,
+      state: "session",
+      session: {
+        uid: entry.uid,
+        email: entry.email,
+        accessToken: tm.accessToken ?? "",
+        refreshToken: tm.refreshToken,
+        expirationTime: tm.expirationTime,
+      },
     };
   } finally {
     db.close();

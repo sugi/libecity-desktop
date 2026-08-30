@@ -34,6 +34,7 @@ await esbuild.build({
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
       export { classifyUrl } from "./src/url-policy.ts";
+      export { SessionWatch } from "./src/session-watch.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -71,6 +72,7 @@ const {
   noticeBody,
   notificationTitle,
   classifyUrl,
+  SessionWatch,
 } = mod;
 
 let failures = 0;
@@ -393,6 +395,26 @@ eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.CO
 // userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
+
+// --- session watch ---
+{
+  const sess = (t) => ({ state: "session", session: { uid: "u", refreshToken: t, accessToken: "" } });
+  const out = { state: "signed-out" };
+  const unk = { state: "unknown" };
+  const w = new SessionWatch(2);
+  eq("watch: an unreadable store says nothing", w.observe(unk).kind, "none");
+  eq("watch: an empty store before any session is not a sign-out", w.observe(out).kind, "none");
+  eq("watch: the first session is reported", w.observe(sess("a")).kind, "session");
+  eq("watch: the same token is not reported twice", w.observe(sess("a")).kind, "none");
+  eq("watch: a rotated token is reported", w.observe(sess("b")).kind, "session");
+  eq("watch: one miss is not a sign-out", w.observe(out).kind, "none");
+  eq("watch: an unreadable store does not count as a miss", w.observe(unk).kind, "none");
+  eq("watch: a session in between clears the streak", w.observe(sess("b")).kind, "none");
+  eq("watch: one miss again is still not a sign-out", w.observe(out).kind, "none");
+  eq("watch: the second consecutive miss is a sign-out", w.observe(out).kind, "signed-out");
+  eq("watch: a sign-out is reported once", w.observe(out).kind, "none");
+  eq("watch: signing back in with the old token is reported again", w.observe(sess("b")).kind, "session");
+}
 
 fs.unlinkSync(outfile);
 if (failures) {
