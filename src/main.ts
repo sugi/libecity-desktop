@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
 import windowStateKeeper from "electron-window-state";
-import { attachTrafficDump, openDump, record } from "./traffic-dump";
-import { type AuthSession } from "./firebase-probe";
+import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
+import { type AuthSession } from "./firebase-auth";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 import { renderTrayIcon } from "./tray-icon";
@@ -111,7 +111,7 @@ app.whenReady().then(() => {
   if (terminating) return;
 
   const dumpPath = openDump();
-  console.log(`[dump] writing API traffic to ${dumpPath}`);
+  if (dumpPath) console.log(`[dump] writing API traffic to ${dumpPath}`);
 
   mainWindow = createWindow();
 
@@ -165,6 +165,10 @@ app.on("window-all-closed", () => {
 
 // In this file you can include the rest of your app"s specific main process
 // code. You can also put them in separate files and require them here.
+
+// The dump stream buffers, and a quit would otherwise drop the tail - which is
+// the part worth reading after a session that misbehaved.
+app.on("will-quit", closeDump);
 
 app.on("second-instance", () => {
   showMainWindow();

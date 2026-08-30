@@ -1,6 +1,6 @@
 import { Notification } from "electron";
 import { LibecityClient, type NoticeCategory } from "./libecity-api";
-import { record } from "./traffic-dump";
+import { log } from "./log";
 
 export type TrayState = "default" | "message" | "notice";
 
@@ -69,7 +69,7 @@ export class NotificationDaemon {
       this.handlers.setTray(computeState(categories), unreadTotal(categories));
       this.notifyNew(categories);
     } catch (err) {
-      record("daemon-poll-error", { error: String(err) });
+      log("daemon-poll-error", { error: String(err) });
     } finally {
       this.polling = false;
     }
@@ -90,7 +90,7 @@ export class NotificationDaemon {
     });
     n.on("click", () => this.handlers.openApp());
     n.show();
-    record("daemon-notify", { type: c.type, title: c.latest_notice_title });
+    log("daemon-notify", { type: c.type, title: c.latest_notice_title });
   }
 }
 

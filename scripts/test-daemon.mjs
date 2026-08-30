@@ -24,6 +24,7 @@ await esbuild.build({
       export { computeState, diffNotifications, unreadTotal } from "./src/notification-daemon.ts";
       export { parseCategories } from "./src/libecity-api.ts";
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
+      export { redact } from "./src/redact.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -44,7 +45,8 @@ await esbuild.build({
 });
 
 const mod = await import(pathToFileURL(outfile).href);
-const { computeState, diffNotifications, unreadTotal, parseCategories, badgeText, drawBadge } = mod;
+const { computeState, diffNotifications, unreadTotal, parseCategories, badgeText, drawBadge, redact } =
+  mod;
 
 let failures = 0;
 const eq = (name, got, want) => {
@@ -163,6 +165,24 @@ eq("draw: glyphs differ (1 is thinner than 8)", one.length < eight.length, true)
 eq("draw: two glyphs are wider than one", spanX(changed(bitmap(), drawBadge(bitmap(), "9+", STYLE))) > spanX(pts), true);
 const short = Buffer.alloc(16);
 eq("draw: mismatched buffer size is returned untouched", drawBadge(short, "9", STYLE).equals(Buffer.alloc(16)), true);
+
+// --- redact ---
+const JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+eq("redact: authorization header", redact({ authorization: `Bearer ${JWT}` }).authorization, `<redacted len=${`Bearer ${JWT}`.length}>`);
+eq("redact: Authorization is case/dash insensitive", redact({ "Proxy-Authorization": "x" })["Proxy-Authorization"], "<redacted len=1>");
+eq("redact: cookie header", redact({ cookie: "session=abc" }).cookie, "<redacted len=11>");
+eq("redact: non-string secret", redact({ token: { a: 1 } }).token, "<redacted>");
+eq("redact: jwt inside a body string", redact({ body: `{"x":"${JWT}"}` }).body, '{"x":"<jwt redacted>"}');
+eq("redact: opaque bearer inside a body string", redact({ body: "Bearer abcdefghij0123456789" }).body, "Bearer <redacted>");
+eq("redact: opaque refresh_token field inside a body string", redact({ body: '{"refresh_token":"AMf-vBxQ_notAJwt","expires_in":"3600"}' }).body, '{"refresh_token":"<redacted>","expires_in":"3600"}');
+eq("redact: auth query param", redact({ url: "wss://x.firebaseio.com/.ws?v=5&auth=SECRET" }).url, "wss://x.firebaseio.com/.ws?v=5&auth=<redacted>");
+eq("redact: gsessionid query param", redact({ url: "https://firestore.googleapis.com/c?gsessionid=Ab9&VER=8" }).url, "https://firestore.googleapis.com/c?gsessionid=<redacted>&VER=8");
+eq("redact: public api key survives", redact({ url: "https://securetoken.googleapis.com/v1/token?key=AIzaPUBLIC" }).url, "https://securetoken.googleapis.com/v1/token?key=AIzaPUBLIC");
+eq("redact: ordinary fields survive", redact({ status: 200, ok: true, type: "message" }), { status: 200, ok: true, type: "message" });
+eq("redact: hasRefreshToken is not a secret", redact({ hasRefreshToken: true }).hasRefreshToken, true);
+eq("redact: last_created_at is not a secret", redact({ last_created_at: "2026-01-01" }).last_created_at, "2026-01-01");
+eq("redact: walks arrays and nesting", redact({ a: [{ idToken: "zz" }] }).a[0].idToken, "<redacted len=2>");
+eq("redact: leaves primitives alone", redact(null), null);
 
 fs.unlinkSync(outfile);
 if (failures) {

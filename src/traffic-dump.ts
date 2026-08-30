@@ -1,6 +1,18 @@
 import { app, WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import { redact } from "./redact";
+
+// Off by default in packaged and unpackaged runs alike. Attaching the debugger
+// claims the CDP slot DevTools needs, the capture grows without bound, and it
+// holds the user's chat traffic - none of which belongs in a normal run. The
+// env var exists because passing argv through `electron-forge start` is fiddly.
+const flag = (arg: string, env: string) =>
+  process.argv.includes(arg) || process.env[env] === "1";
+
+const DUMP_SECRETS = flag("--dump-secrets", "LIBECITY_DUMP_SECRETS");
+// --dump-secrets on its own would otherwise silently capture nothing.
+const DUMP_ENABLED = flag("--dump-api", "LIBECITY_DUMP") || DUMP_SECRETS;
 
 // Only hosts that could carry the chat/session API surface. Static assets and
 // third-party trackers would drown the dump.
@@ -21,19 +33,18 @@ const MAX_BODY = 256 * 1024;
 let stream: fs.WriteStream | undefined;
 let currentPath: string | undefined;
 
-export function dumpFilePath(): string | undefined {
-  return currentPath;
-}
-
-export function openDump(): string {
+export function openDump(): string | undefined {
+  if (!DUMP_ENABLED) return undefined;
   const dir = path.join(app.getPath("userData"), "dump");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   currentPath = path.join(dir, `session-${stamp}.jsonl`);
   stream = fs.createWriteStream(currentPath, { flags: "a", mode: 0o600 });
   record("meta", {
-    warning:
-      "Contains ID tokens, refresh tokens and Authorization headers. Do not share.",
+    warning: DUMP_SECRETS
+      ? "Contains ID tokens, refresh tokens and Authorization headers. Do not share."
+      : "Credentials are redacted, but bodies still hold chat content and account data. Review before sharing.",
+    secrets: DUMP_SECRETS,
     file: currentPath,
   });
   return currentPath;
@@ -47,7 +58,11 @@ export function closeDump(): void {
 export function record(kind: string, data: unknown): void {
   if (!stream) return;
   stream.write(
-    JSON.stringify({ t: new Date().toISOString(), kind, data }) + "\n"
+    JSON.stringify({
+      t: new Date().toISOString(),
+      kind,
+      data: DUMP_SECRETS ? data : redact(data),
+    }) + "\n"
   );
 }
 
@@ -81,6 +96,8 @@ type PendingRequest = {
 // Uses CDP rather than session.webRequest because only the debugger protocol
 // exposes response bodies, which is where the Firestore WebChannel payloads are.
 export async function attachTrafficDump(wc: WebContents): Promise<void> {
+  // Bail before debugger.attach so an ordinary run leaves DevTools usable.
+  if (!stream) return;
   try {
     wc.debugger.attach("1.3");
   } catch (err) {

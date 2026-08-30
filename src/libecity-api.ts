@@ -1,6 +1,6 @@
 import { session as electronSession, type Session } from "electron";
-import { refreshIdToken } from "./firebase-probe";
-import { record } from "./traffic-dump";
+import { refreshIdToken } from "./firebase-auth";
+import { log } from "./log";
 
 // A notification category as returned by city.notice.getCategories. One entry
 // per bell category (message, dm, follow, live, ...).
@@ -64,7 +64,7 @@ export class LibecityClient {
       body: JSON.stringify({ token: idToken }),
     });
     const body = await res.text().catch(() => "");
-    record("daemon-login", { status: res.status, ok: res.ok, body: body.slice(0, 200) });
+    log("daemon-login", { status: res.status, ok: res.ok, body: body.slice(0, 200) });
     if (!res.ok) throw new Error(`auth/login failed: status=${res.status}`);
     this.loggedInFor = idToken;
   }
@@ -94,12 +94,12 @@ export class LibecityClient {
 
     const text = await res.text();
     if (!res.ok) {
-      record("daemon-categories-error", { status: res.status, body: text.slice(0, 300) });
+      log("daemon-categories-error", { status: res.status, body: text.slice(0, 300) });
       throw new Error(`getCategories failed: status=${res.status}`);
     }
 
     const categories = parseCategories(text);
-    record("daemon-categories", {
+    log("daemon-categories", {
       status: res.status,
       summary: categories.map((c) => ({
         type: c.type,
