@@ -9,7 +9,7 @@ export type UnreadCounts = Record<string, number>;
 export function unreadTotal(categories: NoticeCategory[]): number {
   return categories
     .filter((c) => c.is_display)
-    .reduce((sum, c) => sum + (c.unread_count || 0), 0);
+    .reduce((sum, c) => sum + Math.max(0, c.unread_count || 0), 0);
 }
 
 // Notice (bell) takes priority over unread chat messages, matching the old

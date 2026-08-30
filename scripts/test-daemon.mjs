@@ -120,6 +120,7 @@ eq("total: empty -> 0", unreadTotal([]), 0);
 eq("total: sums across categories", unreadTotal([cat("message", 2, "t1"), cat("dm", 3, "t1")]), 5);
 eq("total: hidden category ignored", unreadTotal([cat("message", 2, "t1"), cat("event", 9, "t1", false)]), 2);
 eq("total: all read -> 0", unreadTotal([cat("message", 0, "t1")]), 0);
+eq("total: negative counts do not reduce the total", unreadTotal([cat("message", 2, "t1"), cat("dm", -5, "t1")]), 2);
 
 // --- badgeText ---
 eq("text: zero -> nothing", badgeText(0), undefined);
