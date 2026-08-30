@@ -15,7 +15,7 @@ import * as os from "os";
 import * as path from "path";
 
 const stub = `
-export const Notification = class {};
+export const Notification = class { static isSupported() { return false; } };
 export const session = { fromPartition: () => ({ fetch: async () => ({}) }) };
 export const safeStorage = { isEncryptionAvailable: () => false };
 export const app = { getPath: () => "." };
@@ -26,7 +26,7 @@ const outfile = path.join(os.tmpdir(), `daemon-test-${process.pid}.mjs`);
 await esbuild.build({
   stdin: {
     contents: `
-      export { diffNotifications } from "./src/notification-daemon.ts";
+      export { NotificationDaemon, diffNotifications } from "./src/notification-daemon.ts";
       export { computeState, unreadTotal, stateFromCounts, totalFromCounts } from "./src/tray-state.ts";
       export { parseCategories } from "./src/libecity-api.ts";
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
@@ -56,6 +56,7 @@ await esbuild.build({
 const mod = await import(pathToFileURL(outfile).href);
 const {
   computeState,
+  NotificationDaemon,
   diffNotifications,
   unreadTotal,
   stateFromCounts,
@@ -393,6 +394,39 @@ eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.CO
 // userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
+
+// --- daemon: a poll must not outlive the client that started it ---
+{
+  const painted = [];
+  let releaseA;
+  const clientA = { getCategories: () => new Promise((r) => { releaseA = () => r([cat("message", 1, "2026-01-05")]); }) };
+  const clientB = { getCategories: async () => [cat("dm", 7, "2026-02-05")] };
+  const clients = [clientA, clientB];
+  const daemon = new NotificationDaemon(
+    { setTray: (state, unread) => painted.push([state, unread]), openUrl: () => {} },
+    60_000,
+    () => clients.shift()
+  );
+  daemon.start("token-a");            // poll A starts and hangs
+  daemon.start("token-b");            // account switch; poll B is queued
+  releaseA();                         // account A's poll finally resolves
+  await new Promise((r) => setTimeout(r, 20));
+  eq("daemon: a stale poll paints nothing", painted.some(([, n]) => n === 1), false);
+  eq("daemon: the new client's poll still runs", painted, [["notice", 7]]);
+  daemon.stop();
+}
+{
+  const painted = [];
+  const daemon = new NotificationDaemon(
+    { setTray: (state, unread) => painted.push([state, unread]), openUrl: () => {} },
+    60_000,
+    () => ({ getCategories: async () => [cat("message", 2, "2026-03-05")] })
+  );
+  daemon.start("t");
+  daemon.stop();
+  await new Promise((r) => setTimeout(r, 20));
+  eq("daemon: a poll resolving after stop paints nothing", painted, []);
+}
 
 fs.unlinkSync(outfile);
 if (failures) {
