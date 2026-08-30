@@ -21,7 +21,8 @@ const outfile = path.join(os.tmpdir(), `daemon-test-${process.pid}.mjs`);
 await esbuild.build({
   stdin: {
     contents: `
-      export { computeState, diffNotifications, unreadTotal } from "./src/notification-daemon.ts";
+      export { diffNotifications } from "./src/notification-daemon.ts";
+      export { computeState, unreadTotal, stateFromCounts, totalFromCounts } from "./src/tray-state.ts";
       export { parseCategories } from "./src/libecity-api.ts";
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
       export { redact } from "./src/redact.ts";
@@ -51,6 +52,8 @@ const {
   computeState,
   diffNotifications,
   unreadTotal,
+  stateFromCounts,
+  totalFromCounts,
   parseCategories,
   badgeText,
   drawBadge,
@@ -327,6 +330,15 @@ eq("notification title: live category",
   notificationTitle({ documentId: "d", type: "beginners_live" }), "リベシティ - ライブ");
 eq("notification title: unknown type is unadorned",
   notificationTitle({ documentId: "d", type: "brand_new_type" }), "リベシティ");
+
+// --- counts map ---
+eq("counts: empty -> default", stateFromCounts({}), "default");
+eq("counts: message only -> message", stateFromCounts({ message: 2, dm: 0 }), "message");
+eq("counts: anything else -> notice", stateFromCounts({ message: 0, dm: 1 }), "notice");
+eq("counts: notice outranks message", stateFromCounts({ message: 5, live: 1 }), "notice");
+eq("counts: total sums every category", totalFromCounts({ message: 2, dm: 3, live: 0 }), 5);
+eq("counts: total of empty -> 0", totalFromCounts({}), 0);
+eq("counts: negatives are ignored", totalFromCounts({ message: -1, dm: 2 }), 2);
 
 fs.unlinkSync(outfile);
 if (failures) {

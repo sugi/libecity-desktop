@@ -1,8 +1,9 @@
 import { Notification } from "electron";
 import { LibecityClient, type NoticeCategory } from "./libecity-api";
 import { log } from "./log";
+import { computeState, unreadTotal, type TrayState } from "./tray-state";
 
-export type TrayState = "default" | "message" | "notice";
+export { type TrayState };
 
 const TYPE_LABELS: Record<string, string> = {
   message: "メッセージ",
@@ -92,22 +93,6 @@ export class NotificationDaemon {
     n.show();
     log("daemon-notify", { type: c.type, title: c.latest_notice_title });
   }
-}
-
-// The badge number: one total across every category the site displays.
-export function unreadTotal(categories: NoticeCategory[]): number {
-  return categories
-    .filter((c) => c.is_display)
-    .reduce((sum, c) => sum + (c.unread_count || 0), 0);
-}
-
-// Notice (bell) takes priority over unread chat messages, matching the old
-// tray behaviour where the notification icon outranked the message icon.
-export function computeState(categories: NoticeCategory[]): TrayState {
-  const displayed = categories.filter((c) => c.is_display);
-  if (displayed.some((c) => c.type !== "message" && c.unread_count > 0)) return "notice";
-  if (displayed.some((c) => c.type === "message" && c.unread_count > 0)) return "message";
-  return "default";
 }
 
 // Which categories should fire a desktop notification, updating `lastSeen` in
