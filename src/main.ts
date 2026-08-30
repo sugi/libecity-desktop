@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
 import windowStateKeeper from "electron-window-state";
+import squirrelStartup from "electron-squirrel-startup";
 import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-auth";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
@@ -26,6 +27,15 @@ if (!app.isPackaged) {
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+
+// Squirrel runs the exe with --squirrel-install/--squirrel-updated to have it
+// create and migrate shortcuts, then exit. Booting the real app instead leaves
+// the install with no shortcuts, and on update the second process would lose
+// the lock below and quit before the migration ran.
+if (squirrelStartup) {
+  terminating = true;
+  app.quit();
+}
 
 if (!app.requestSingleInstanceLock()) {
   terminating = true;
