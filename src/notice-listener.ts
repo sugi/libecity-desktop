@@ -181,7 +181,11 @@ export class NoticeListener {
           // API's categories - every category here counts toward the tray,
           // which is a deliberate divergence from the polling path.
           const counts = (snap.data()?.notice_unread_counts ?? {}) as UnreadCounts;
-          this.handlers.setTray(stateFromCounts(counts), totalFromCounts(counts));
+          try {
+            this.handlers.setTray(stateFromCounts(counts), totalFromCounts(counts));
+          } catch (err) {
+            safeLog("listener-error", { at: "set-tray", error: String(err) });
+          }
         },
         (err) => this.fail("tray-snapshot", err)
       )
@@ -198,7 +202,13 @@ export class NoticeListener {
             .docChanges()
             .filter((c) => c.type === "added")
             .map((c) => ({ documentId: c.doc.id, ...c.doc.data() }) as Notice);
-          if (added.length) this.notify(added);
+          if (added.length) {
+            try {
+              this.notify(added);
+            } catch (err) {
+              safeLog("listener-error", { at: "notify", error: String(err) });
+            }
+          }
         },
         (err) => this.fail("notices-snapshot", err)
       )
@@ -223,7 +233,13 @@ export class NoticeListener {
 
   private show(title: string, body: string, url?: string): void {
     const n = new Notification({ title, body });
-    n.on("click", () => this.handlers.openUrl(url));
+    n.on("click", () => {
+      try {
+        this.handlers.openUrl(url);
+      } catch (err) {
+        safeLog("listener-error", { at: "open-url", error: String(err) });
+      }
+    });
     n.show();
   }
 }
