@@ -30,12 +30,6 @@ export class LibecityClient {
     this.session = electronSession.fromPartition(PARTITION);
   }
 
-  updateRefreshToken(token: string): void {
-    this.refreshToken = token;
-    this.token = undefined;
-    this.loggedInFor = undefined;
-  }
-
   private async ensureIdToken(): Promise<string> {
     const now = Date.now();
     if (this.token && this.token.expiresAt - 60_000 > now) {

@@ -115,8 +115,14 @@ const listener = new NoticeListener({
 // it: start() resolving true means the subscriptions are registered, which is
 // not the same as data arriving. The daemon's first tick only seeds its
 // baseline, so the overlap cannot double-fire a notification.
+
+// The token the listener is currently running with (or was last asked to
+// run with), so a repeat auth-session for the same account can be told apart
+// from one worth acting on.
+let listenerToken: string | undefined;
 const startNotifications = (refreshToken: string) => {
   daemon.start(refreshToken);
+  listenerToken = refreshToken;
   void listener.start(refreshToken).then((ok) => {
     if (!ok) log("listener-start-failed");
   });
@@ -183,11 +189,18 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
     expirationTime: session.expirationTime,
   });
   if (!session.refreshToken) return;
-  // updateRefreshToken() falls back to starting the daemon internally when
-  // no client exists yet, so this must not run once a quit is under way.
+  // This reaches startNotifications(), which reaches daemon.start(), so it
+  // must not run once a quit is under way.
   if (terminating) return;
   saveRefreshToken(session.refreshToken);
-  daemon.updateRefreshToken(session.refreshToken);
+  // Every window sends this on open even when nothing changed - the preload
+  // has no way to know the token it read back is the one the listener is
+  // already running with. Skip the restart in that case: it would otherwise
+  // tear down and re-subscribe a healthy listener on every window, losing
+  // whatever arrives during the gap. A different token (another account) or a
+  // listener that is not running (this is then the self-heal path, since
+  // nothing else retries a failed start on its own) still goes through.
+  if (session.refreshToken === listenerToken && listener.running) return;
   startNotifications(session.refreshToken);
 });
 

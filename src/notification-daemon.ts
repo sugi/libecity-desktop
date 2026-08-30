@@ -26,22 +26,16 @@ export class NotificationDaemon {
     private intervalMs = 15 * 60_000
   ) {}
 
+  // A new client means a new baseline: the caller may be a different account,
+  // or the same one after a gap during which the listener already showed
+  // whatever arrived, so the first poll after any start must seed rather than
+  // fire against a stale one.
   start(refreshToken: string): void {
     this.client = new LibecityClient(refreshToken);
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => void this.poll(), this.intervalMs);
-    void this.poll();
-  }
-
-  // A fresh login may be a different account, so drop the baseline and re-seed.
-  updateRefreshToken(refreshToken: string): void {
-    if (!this.client) {
-      this.start(refreshToken);
-      return;
-    }
-    this.client.updateRefreshToken(refreshToken);
     this.seeded = false;
     this.lastCreatedAt.clear();
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => void this.poll(), this.intervalMs);
     void this.poll();
   }
 
