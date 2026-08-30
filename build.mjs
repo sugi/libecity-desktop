@@ -12,7 +12,7 @@ await esbuild.build({
 })
 
 await esbuild.build({
-  entryPoints: ['src/renderer.ts', 'src/preload.ts'],
+  entryPoints: ['src/preload.ts'],
   bundle: true,
   platform: 'browser',
   target: ['chrome120'],

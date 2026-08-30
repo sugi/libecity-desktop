@@ -16,15 +16,5 @@ export default tseslint.config(
         process: "readonly",
       },
     },
-  },
-  {
-    files: ["src/renderer.ts"],
-    languageOptions: {
-      globals: {
-        document: "readonly",
-        window: "readonly",
-        console: "readonly",
-      },
-    },
   }
 );
