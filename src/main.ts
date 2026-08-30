@@ -103,24 +103,30 @@ app.whenReady().then(() => {
 
   mainWindow = createWindow();
 
-  tray = new Tray(iconPath.default);
-  tray.setTitle("リベシティ");
-  tray.setToolTip("リベシティ");
+  // A tray failure must not abort the rest of startup (daemon, activate).
+  try {
+    tray = new Tray(iconPath.default);
+    tray.setTitle("リベシティ");
+    tray.setToolTip("リベシティ");
 
-  const contextMenu = Menu.buildFromTemplate([
-    { label: "チャットを表示", click: showMainWindow },
-    { type: "separator" },
-    {
-      label: "終了する",
-      click() {
-        terminating = true;
-        app.quit();
+    const contextMenu = Menu.buildFromTemplate([
+      { label: "チャットを表示", click: showMainWindow },
+      { type: "separator" },
+      {
+        label: "終了する",
+        click() {
+          terminating = true;
+          app.quit();
+        },
       },
-    },
-  ]);
+    ]);
 
-  tray.setContextMenu(contextMenu);
-  tray.addListener("click", showMainWindow);
+    tray.setContextMenu(contextMenu);
+    tray.addListener("click", showMainWindow);
+    console.log(`[tray] created on ${process.platform}, icon=${iconPath.default}`);
+  } catch (err) {
+    console.error("[tray] failed to create:", err);
+  }
 
   // Start notifications immediately from a stored session, before any login -
   // this is what lets notifications work with the window closed.
