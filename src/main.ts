@@ -250,9 +250,9 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
   // the preload's token is whatever the renderer's own copy of the Firebase
   // SDK currently holds and rotates on its own schedule, so two restores of
   // the same account can legitimately carry different tokens. A different
-  // uid (another account) or a listener that is not running (this is then
-  // the self-heal path, since nothing else retries a failed start on its
-  // own) still goes through.
+  // uid (another account) or a listener that is not running still goes
+  // through - opening a window is then a second way back, alongside
+  // listenerRestart's backoff.
   if (session.uid === listener.uid && listener.running) return;
   startNotifications(session.refreshToken);
 });
