@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
-import windowStateKeeper = require("electron-window-state");
+import windowStateKeeper from "electron-window-state";
 import { attachTrafficDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-probe";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
