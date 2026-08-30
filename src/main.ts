@@ -1,16 +1,20 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, Tray } from "electron";
 import * as path from "path";
-import * as fs from "fs";
 import windowStateKeeper = require("electron-window-state");
+import { attachTrafficDump, openDump, record } from "./traffic-dump";
+import { type AuthSession } from "./firebase-probe";
+import { loadRefreshToken, saveRefreshToken } from "./session-store";
+import { NotificationDaemon, type TrayState } from "./notification-daemon";
 
 const iconPath = {
   default: path.join(__dirname, "..", "images", "trayicon.png"),
-  hasNotification: path.join(__dirname, "..", "images", "trayicon-rd.png"),
-  hasNewMessage: path.join(__dirname, "..", "images", "trayicon-gd.png"),
+  notice: path.join(__dirname, "..", "images", "trayicon-rd.png"),
+  message: path.join(__dirname, "..", "images", "trayicon-gd.png"),
 };
 
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
 
 if (!app.requestSingleInstanceLock()) {
   terminating = true;
@@ -29,11 +33,9 @@ const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
-ipcMain.on("inject-renderer", () => {
-  if (!mainWindow) return;
-  mainWindow.webContents.executeJavaScript(
-    fs.readFileSync(path.join(__dirname, "renderer.js")).toString()
-  );
+const daemon = new NotificationDaemon({
+  setTrayState: (state: TrayState) => tray?.setImage(iconPath[state]),
+  openApp: showMainWindow,
 });
 
 function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
@@ -57,6 +59,7 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
 
   // and load the index.html of the app.
   // win.loadFile(path.join(__dirname, "../index.html"));
+  void attachTrafficDump(win.webContents);
   win.loadURL("https://libecity.com/");
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -68,7 +71,7 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
     return { action: "deny" };
   });
 
-  win.on("close", (e) => {
+  win.on("close", () => {
     mainWindow = undefined;
   });
 
@@ -78,15 +81,29 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
 
 app.setName("libecity-desktop");
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+// The webview hands over the Firebase session after login. Persist the refresh
+// token so the daemon can run without a window, and (re)start it.
+ipcMain.on("auth-session", (_event, session: AuthSession) => {
+  record("auth-session", {
+    uid: session.uid,
+    email: session.email,
+    hasRefreshToken: Boolean(session.refreshToken),
+    expirationTime: session.expirationTime,
+  });
+  if (!session.refreshToken) return;
+  saveRefreshToken(session.refreshToken);
+  daemon.updateRefreshToken(session.refreshToken);
+});
+
 app.whenReady().then(() => {
   if (terminating) return;
 
+  const dumpPath = openDump();
+  console.log(`[dump] writing API traffic to ${dumpPath}`);
+
   mainWindow = createWindow();
 
-  const tray = new Tray(iconPath.default);
+  tray = new Tray(iconPath.default);
   tray.setTitle("リベシティ");
   tray.setToolTip("リベシティ");
 
@@ -105,15 +122,10 @@ app.whenReady().then(() => {
   tray.setContextMenu(contextMenu);
   tray.addListener("click", showMainWindow);
 
-  ipcMain.on("icon-notification", () => {
-    tray.setImage(iconPath.hasNotification);
-  });
-  ipcMain.on("icon-new-message", () => {
-    tray.setImage(iconPath.hasNewMessage);
-  });
-  ipcMain.on("icon-default", () => {
-    tray.setImage(iconPath.default);
-  });
+  // Start notifications immediately from a stored session, before any login -
+  // this is what lets notifications work with the window closed.
+  const stored = loadRefreshToken();
+  if (stored) daemon.start(stored);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the

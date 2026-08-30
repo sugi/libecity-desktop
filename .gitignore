@@ -1,3 +1,8 @@
 node_modules
 dist
 out/
+
+# API dump experiment - contains auth tokens and personal data
+*.jsonl
+report.txt
+session.tsv
