@@ -73,25 +73,43 @@ const setTray = (state: TrayState, unread: number) => {
 };
 
 const daemon = new NotificationDaemon({ setTray, openUrl });
+
+// Which path is live is decided by the listener's health, not by whether it
+// started: the poll runs whenever the listener is not reaching the server, so
+// startup, a terminal error and a connection that merely went quiet are all
+// the same case here. An outage that never resolves therefore polls forever,
+// which is the degradation we want.
+let listenerHealthy = false;
 const listener = new NoticeListener({
   setTray,
   openUrl,
-  onFailure: () => {
+  setHealthy: (healthy) => {
+    if (healthy === listenerHealthy) return;
+    listenerHealthy = healthy;
+    if (healthy) {
+      daemon.stop();
+      return;
+    }
     const token = loadRefreshToken();
-    if (token) daemon.start(token);
+    if (token) {
+      daemon.start(token);
+    } else {
+      log("poll-fallback-skipped", { reason: "no-refresh-token" });
+    }
   },
 });
 
 // The listener is preferred, but nothing bounds how long its start() takes -
 // the token refresh underneath it is a bare fetch with no AbortSignal, so a
 // stalled connect would leave the app with neither path running and nothing
-// logged. The poll therefore runs from the start and is stopped only once the
-// listener is confirmed up. Its first tick only seeds its baseline, so the
-// brief overlap cannot double-fire a notification.
+// logged. The poll therefore runs from the start, and only setHealthy stops
+// it: start() resolving true means the subscriptions are registered, which is
+// not the same as data arriving. The daemon's first tick only seeds its
+// baseline, so the overlap cannot double-fire a notification.
 const startNotifications = (refreshToken: string) => {
   daemon.start(refreshToken);
   void listener.start(refreshToken).then((ok) => {
-    if (ok) daemon.stop();
+    if (!ok) log("listener-start-failed");
   });
 };
 
