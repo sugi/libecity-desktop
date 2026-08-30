@@ -39,7 +39,15 @@ export function openDump(): string | undefined {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   currentPath = path.join(dir, `session-${stamp}.jsonl`);
-  stream = fs.createWriteStream(currentPath, { flags: "a", mode: 0o600 });
+  const opened = fs.createWriteStream(currentPath, { flags: "a", mode: 0o600 });
+  // Without a listener an fs-level failure - a full disk, a quota - emits
+  // 'error' as an uncaught exception and takes the whole app with it. The
+  // capture is a diagnostic; losing it is not worth losing the app.
+  opened.on("error", (err) => {
+    console.error("[dump] write failed, capture stopped:", err);
+    if (stream === opened) stream = undefined;
+  });
+  stream = opened;
   record("meta", {
     warning: DUMP_SECRETS
       ? "Contains ID tokens, refresh tokens and Authorization headers. Do not share."
@@ -57,13 +65,21 @@ export function closeDump(): void {
 
 export function record(kind: string, data: unknown): void {
   if (!stream) return;
-  stream.write(
-    JSON.stringify({
-      t: new Date().toISOString(),
-      kind,
-      data: DUMP_SECRETS ? data : redact(data),
-    }) + "\n"
-  );
+  // A synchronous throw here - a stream already destroyed by the handler above,
+  // or a value redact() cannot stringify - would propagate into whatever it was
+  // logging, which is never code that expects a diagnostic to fail.
+  try {
+    stream.write(
+      JSON.stringify({
+        t: new Date().toISOString(),
+        kind,
+        data: DUMP_SECRETS ? data : redact(data),
+      }) + "\n"
+    );
+  } catch (err) {
+    console.error("[dump] record failed, capture stopped:", err);
+    stream = undefined;
+  }
 }
 
 const isInteresting = (url: string): boolean => {
@@ -186,10 +202,17 @@ export async function attachTrafficDump(wc: WebContents): Promise<void> {
     }
   };
 
-  await wc.debugger.sendCommand("Network.enable", {
-    maxTotalBufferSize: 100_000_000,
-    maxResourceBufferSize: 20_000_000,
-  });
+  try {
+    await wc.debugger.sendCommand("Network.enable", {
+      maxTotalBufferSize: 100_000_000,
+      maxResourceBufferSize: 20_000_000,
+    });
+  } catch (err) {
+    // The window can be gone by now; this is the one await whose rejection
+    // would leave attachTrafficDump()'s caller with an unhandled rejection.
+    record("dump-error", { at: "network-enable", error: String(err) });
+    return;
+  }
   record("dump-ready", { url: wc.getURL() });
 }
 
