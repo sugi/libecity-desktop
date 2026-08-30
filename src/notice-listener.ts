@@ -35,6 +35,8 @@ export class NoticeListener {
   private unsubs: Unsubscribe[] = [];
   private db?: Firestore;
   private started = false;
+  private failed = false;
+  private teardowns: Promise<void> = Promise.resolve();
 
   constructor(private handlers: ListenerHandlers) {}
 
@@ -42,17 +44,20 @@ export class NoticeListener {
     return this.started;
   }
 
+  // Never throws: false is the caller's signal to fall back to polling, so
+  // everything - the leading stop() included - stays inside the try.
   async start(refreshToken: string): Promise<boolean> {
-    await this.stop();
-    const session = await restoreAuth(refreshToken);
-    if (!session) return false;
-
     try {
+      await this.stop();
+      const session = await restoreAuth(refreshToken);
+      if (!session) return false;
+
       const db = getFirestore(session.app);
       this.db = db;
       this.watchTray(db, session.uid);
       this.watchNotices(db, session.uid);
       this.started = true;
+      this.failed = false;
       log("listener-start", { uid: session.uid });
       return true;
     } catch (err) {
@@ -62,26 +67,63 @@ export class NoticeListener {
     }
   }
 
-  async stop(): Promise<void> {
+  // Never rejects, and safe to call twice or concurrently: teardowns run one
+  // at a time, so a start() that follows a failure's background cleanup does
+  // not restore the session until that cleanup has released the old one.
+  stop(): Promise<void> {
+    const done = this.teardowns.then(
+      () => this.teardown(),
+      () => this.teardown()
+    );
+    this.teardowns = done;
+    return done;
+  }
+
+  private async teardown(): Promise<void> {
     for (const unsub of this.unsubs) {
       try {
         unsub();
-      } catch {
-        // already gone
+      } catch (err) {
+        log("listener-error", { at: "unsubscribe", error: String(err) });
       }
     }
     this.unsubs = [];
     this.started = false;
-    if (this.db) {
-      await terminate(this.db).catch(() => undefined);
-      this.db = undefined;
+    // terminate() drops the service instance synchronously before it returns
+    // a promise, so it can throw outright on an instance already gone. The
+    // field is cleared first and the call is wrapped, so neither that throw
+    // nor a rejection can skip releaseAuth() or strand a Firestore here.
+    const db = this.db;
+    this.db = undefined;
+    if (db) {
+      try {
+        await terminate(db);
+      } catch (err) {
+        log("listener-error", { at: "terminate", error: String(err) });
+      }
     }
-    await releaseAuth();
+    try {
+      await releaseAuth();
+    } catch (err) {
+      log("listener-error", { at: "release-auth", error: String(err) });
+    }
   }
 
+  // The fallback signal goes out before cleanup rather than after it: teardown
+  // waits on releaseAuth(), which queues behind any in-flight restoreAuth()
+  // with no timeout, and the app must not go that long without notifications.
+  // The flag keeps one failure to one signal when both snapshots error at once.
   private fail(at: string, err: unknown): void {
     log("listener-error", { at, error: String(err) });
-    void this.stop().then(() => this.handlers.onFailure());
+    if (this.failed) return;
+    this.failed = true;
+    this.started = false;
+    try {
+      this.handlers.onFailure();
+    } catch (handlerErr) {
+      log("listener-error", { at: "on-failure", error: String(handlerErr) });
+    }
+    void this.stop();
   }
 
   private watchTray(db: Firestore, uid: string): void {
@@ -118,7 +160,10 @@ export class NoticeListener {
   }
 
   private notify(notices: Notice[]): void {
-    if (!Notification.isSupported()) return;
+    if (!Notification.isSupported()) {
+      log("listener-notify-skip", { reason: "unsupported", count: notices.length });
+      return;
+    }
     const { fire, collapsed } = capNotices(notices);
     for (const n of fire) this.show(notificationTitle(n), noticeBody(n), noticeUrl(n));
     if (collapsed > 0) {
