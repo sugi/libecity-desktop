@@ -28,6 +28,18 @@ export type ListenerHandlers = {
   onFailure: () => void;
 };
 
+// log() writes to the dump stream and to the console, and either can throw
+// (EPIPE, a dump file closed under it). Nothing in this file may lose the
+// fallback signal or raise an unhandled rejection because a diagnostic line
+// failed, so every log call here goes through this guard instead.
+function safeLog(kind: string, data?: unknown): void {
+  try {
+    log(kind, data);
+  } catch {
+    // Diagnostics are best-effort; a lost line must not change control flow.
+  }
+}
+
 // Watches the two documents that say what the tray should show and what just
 // arrived, so nothing has to be polled. The notices query starts at "now", so
 // the first snapshot is empty and a backlog never fires on startup.
@@ -36,7 +48,7 @@ export class NoticeListener {
   private db?: Firestore;
   private started = false;
   private failed = false;
-  private teardowns: Promise<void> = Promise.resolve();
+  private ops: Promise<void> = Promise.resolve();
 
   constructor(private handlers: ListenerHandlers) {}
 
@@ -44,11 +56,48 @@ export class NoticeListener {
     return this.started;
   }
 
-  // Never throws: false is the caller's signal to fall back to polling, so
-  // everything - the leading stop() included - stays inside the try.
-  async start(refreshToken: string): Promise<boolean> {
+  // start() and stop() share one chain because restoreAuth() and releaseAuth()
+  // share one queue in firebase-session with no timeout on either leg. A
+  // restore left off this chain would take its place in that queue, suspend on
+  // the token refresh, and let a later teardown's releaseAuth line up behind
+  // it - deleting the app the restore is about to hand back, and erroring the
+  // subscriptions it had just installed. Every restore has to stay paired with
+  // the teardown ahead of it, which is what this chain buys.
+  //
+  // The position is taken synchronously and nothing is awaited before the
+  // caller gets its promise, so registering work is enough to order it. Links
+  // are isolated: each caller keeps its own promise, and a rejected one is
+  // swallowed before the next link chains off it, so one failure cannot poison
+  // the queue.
+  private enqueue<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.ops.then(op, op);
+    this.ops = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  // Never rejects: false is the caller's signal to fall back to polling.
+  start(refreshToken: string): Promise<boolean> {
+    return this.enqueue(() => this.startImpl(refreshToken));
+  }
+
+  // Never rejects, and safe to call twice or concurrently. The release is
+  // ordered, not immediate: this registers a teardown behind whatever is
+  // already queued, and clears nothing synchronously. A caller that fires and
+  // forgets can still get tray updates and notifications for the old account
+  // until the chain drains - await it to be sure they have stopped.
+  stop(): Promise<void> {
+    return this.enqueue(() => this.teardown());
+  }
+
+  // Runs as a chain link, so it calls teardown() directly: going through
+  // stop() would queue behind itself and deadlock. firebase-session splits its
+  // *Impl functions from its queued entry points for the same reason.
+  private async startImpl(refreshToken: string): Promise<boolean> {
     try {
-      await this.stop();
+      await this.teardown();
       const session = await restoreAuth(refreshToken);
       if (!session) return false;
 
@@ -58,25 +107,18 @@ export class NoticeListener {
       this.watchNotices(db, session.uid);
       this.started = true;
       this.failed = false;
-      log("listener-start", { uid: session.uid });
+      safeLog("listener-start", { uid: session.uid });
       return true;
     } catch (err) {
-      log("listener-error", { at: "start", error: String(err) });
-      await this.stop();
+      safeLog("listener-error", { at: "start", error: String(err) });
+      try {
+        await this.teardown();
+      } catch {
+        // teardown() guards each of its own steps; this keeps "start() returns
+        // false rather than rejecting" true even if a future edit slips one.
+      }
       return false;
     }
-  }
-
-  // Never rejects, and safe to call twice or concurrently: teardowns run one
-  // at a time, so a start() that follows a failure's background cleanup does
-  // not restore the session until that cleanup has released the old one.
-  stop(): Promise<void> {
-    const done = this.teardowns.then(
-      () => this.teardown(),
-      () => this.teardown()
-    );
-    this.teardowns = done;
-    return done;
   }
 
   private async teardown(): Promise<void> {
@@ -84,7 +126,7 @@ export class NoticeListener {
       try {
         unsub();
       } catch (err) {
-        log("listener-error", { at: "unsubscribe", error: String(err) });
+        safeLog("listener-error", { at: "unsubscribe", error: String(err) });
       }
     }
     this.unsubs = [];
@@ -99,13 +141,13 @@ export class NoticeListener {
       try {
         await terminate(db);
       } catch (err) {
-        log("listener-error", { at: "terminate", error: String(err) });
+        safeLog("listener-error", { at: "terminate", error: String(err) });
       }
     }
     try {
       await releaseAuth();
     } catch (err) {
-      log("listener-error", { at: "release-auth", error: String(err) });
+      safeLog("listener-error", { at: "release-auth", error: String(err) });
     }
   }
 
@@ -116,14 +158,9 @@ export class NoticeListener {
   // stop() is called first, not after the handler: its enqueue is synchronous
   // and blocks on nothing, so onFailure() still fires in the same turn with
   // nothing awaited before it, but registering first puts this teardown ahead
-  // of any stop() a synchronously-retrying handler triggers via start() -
-  // that ordering is what the comment on stop() depends on.
+  // of any start() a synchronously-retrying handler enqueues.
   private fail(at: string, err: unknown): void {
-    try {
-      log("listener-error", { at, error: String(err) });
-    } catch {
-      // log() must not be able to block the fallback signal below.
-    }
+    safeLog("listener-error", { at, error: String(err) });
     if (this.failed) return;
     this.failed = true;
     this.started = false;
@@ -131,7 +168,7 @@ export class NoticeListener {
     try {
       this.handlers.onFailure();
     } catch (handlerErr) {
-      log("listener-error", { at: "on-failure", error: String(handlerErr) });
+      safeLog("listener-error", { at: "on-failure", error: String(handlerErr) });
     }
   }
 
@@ -170,7 +207,7 @@ export class NoticeListener {
 
   private notify(notices: Notice[]): void {
     if (!Notification.isSupported()) {
-      log("listener-notify-skip", { reason: "unsupported", count: notices.length });
+      safeLog("listener-notify-skip", { reason: "unsupported", count: notices.length });
       return;
     }
     const { fire, collapsed } = capNotices(notices);
@@ -178,7 +215,7 @@ export class NoticeListener {
     if (collapsed > 0) {
       this.show("リベシティ", `他 ${collapsed} 件の通知があります`, undefined);
     }
-    log("listener-notify", {
+    safeLog("listener-notify", {
       fired: fire.map((n) => n.type),
       collapsed,
     });
