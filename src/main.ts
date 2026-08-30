@@ -5,6 +5,7 @@ import { attachTrafficDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-probe";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
+import { renderTrayIcon } from "./tray-icon";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
 // newer than its own, so hopping between Electron versions during development
@@ -13,12 +14,6 @@ import { NotificationDaemon, type TrayState } from "./notification-daemon";
 if (!app.isPackaged) {
   app.setPath("userData", `${app.getPath("userData")}-dev`);
 }
-
-const iconPath = {
-  default: path.join(__dirname, "..", "images", "trayicon.png"),
-  notice: path.join(__dirname, "..", "images", "trayicon-rd.png"),
-  message: path.join(__dirname, "..", "images", "trayicon-gd.png"),
-};
 
 let terminating = false;
 let mainWindow: BrowserWindow | undefined;
@@ -41,8 +36,17 @@ const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
+// The daemon polls every 30s; only touch the tray when the picture would change.
+let shownTray: string | undefined;
 const daemon = new NotificationDaemon({
-  setTrayState: (state: TrayState) => tray?.setImage(iconPath[state]),
+  setTray: (state: TrayState, unread: number) => {
+    if (!tray) return;
+    const key = `${state}:${unread}`;
+    if (key === shownTray) return;
+    shownTray = key;
+    tray.setImage(renderTrayIcon(state, unread));
+    tray.setToolTip(unread > 0 ? `リベシティ (${unread})` : "リベシティ");
+  },
   openApp: showMainWindow,
 });
 
@@ -113,7 +117,7 @@ app.whenReady().then(() => {
 
   // A tray failure must not abort the rest of startup (daemon, activate).
   try {
-    tray = new Tray(iconPath.default);
+    tray = new Tray(renderTrayIcon("default", 0));
     tray.setTitle("リベシティ");
     tray.setToolTip("リベシティ");
 
@@ -131,7 +135,7 @@ app.whenReady().then(() => {
 
     tray.setContextMenu(contextMenu);
     tray.addListener("click", showMainWindow);
-    console.log(`[tray] created on ${process.platform}, icon=${iconPath.default}`);
+    console.log(`[tray] created on ${process.platform}`);
   } catch (err) {
     console.error("[tray] failed to create:", err);
   }

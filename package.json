@@ -6,6 +6,7 @@
     "build": "node build.mjs && chmod o+r dist/*",
     "watch": "tsc -w",
     "lint": "eslint ./src",
+    "test": "node scripts/test-daemon.mjs",
     "start": "npm run build && electron-forge start",
     "clean": "rm -rf dist",
     "electron-forge": "electron-forge",

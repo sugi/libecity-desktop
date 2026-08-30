@@ -18,7 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export type DaemonHandlers = {
-  setTrayState: (state: TrayState) => void;
+  setTray: (state: TrayState, unread: number) => void;
   openApp: () => void;
 };
 
@@ -66,7 +66,7 @@ export class NotificationDaemon {
     this.polling = true;
     try {
       const categories = await this.client.getCategories();
-      this.handlers.setTrayState(computeState(categories));
+      this.handlers.setTray(computeState(categories), unreadTotal(categories));
       this.notifyNew(categories);
     } catch (err) {
       record("daemon-poll-error", { error: String(err) });
@@ -92,6 +92,13 @@ export class NotificationDaemon {
     n.show();
     record("daemon-notify", { type: c.type, title: c.latest_notice_title });
   }
+}
+
+// The badge number: one total across every category the site displays.
+export function unreadTotal(categories: NoticeCategory[]): number {
+  return categories
+    .filter((c) => c.is_display)
+    .reduce((sum, c) => sum + (c.unread_count || 0), 0);
 }
 
 // Notice (bell) takes priority over unread chat messages, matching the old
