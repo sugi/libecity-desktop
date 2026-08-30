@@ -33,7 +33,6 @@ await esbuild.build({
       export { redact } from "./src/redact.ts";
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
-      export { classifyUrl } from "./src/url-policy.ts";
       export { SeededPersistence, seedPersistence, clearSeeded } from "./src/seeded-persistence.ts";
       export { RestartScheduler } from "./src/restart-scheduler.ts";
       export { SessionWatch } from "./src/session-watch.ts";
@@ -460,6 +459,7 @@ eq("redact: values past the depth limit are masked, not passed through",
   eq("persistence: exactly one class object is ever handed out", first === second, true);
   clearSeeded();
   eq("persistence: clearing empties the store", await store._get("k3"), null);
+}
 // --- daemon: a poll must not outlive the client that started it ---
 {
   const painted = [];
@@ -529,6 +529,7 @@ eq("redact: values past the depth limit are masked, not passed through",
   eq("restart: cancel clears the pending attempt", timers.length, 0);
   s.schedule();
   eq("restart: the backoff resets after a cancel", delays[5], 30_000);
+}
 // --- session watch ---
 {
   const sess = (t) => ({ state: "session", session: { uid: "u", refreshToken: t, accessToken: "" } });
