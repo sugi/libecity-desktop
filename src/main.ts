@@ -44,8 +44,14 @@ const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
-// Notifications carry a target.
+// Notifications carry a target, but the daemon's fallback path and the
+// listener's collapsed "他 N 件" toast pass none by design - that just means
+// "show the window", not a hostile or unparseable URL worth a rejection log.
 const openUrl = (url?: string) => {
+  if (url === undefined) {
+    showMainWindow();
+    return;
+  }
   switch (classifyUrl(url)) {
     case "internal":
       if (typeof mainWindow === "undefined") {
@@ -274,7 +280,7 @@ app.on("second-instance", () => {
 // An open Firestore stream holds handles that would outlive the quit. Setting
 // terminating here, first and synchronously, closes off every daemon.start()
 // call in this file before listener.stop()'s queued teardown - which signals
-// its demote ahead of its own awaits - can reach the setHealthy handler below.
+// its demote ahead of its own awaits - can reach the setHealthy handler above.
 app.on("before-quit", () => {
   terminating = true;
   daemon.stop();

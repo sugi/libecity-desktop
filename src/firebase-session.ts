@@ -59,9 +59,16 @@ function refreshErrorReason(body: unknown): string | undefined {
 
 async function releaseAuthImpl(): Promise<void> {
   for (const app of getApps()) {
-    await deleteApp(app).catch((err) =>
-      log("listener-auth-error", { at: "delete-app", error: String(err) })
-    );
+    // log() can throw (EPIPE, a dump file closed under it); that must not
+    // reject this catch handler and skip clearing seededStore / the rest of
+    // this loop.
+    await deleteApp(app).catch((err) => {
+      try {
+        log("listener-auth-error", { at: "delete-app", error: String(err) });
+      } catch {
+        // Diagnostics are best-effort here too.
+      }
+    });
   }
   seededStore.clear();
 }
