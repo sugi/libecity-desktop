@@ -6,6 +6,14 @@ import { type AuthSession } from "./firebase-probe";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
 
+// Chromium deletes an IndexedDB store whose Blink serialization format is
+// newer than its own, so hopping between Electron versions during development
+// wipes the login state. Keeping the dev profile separate also gives it its own
+// single-instance lock, so a dev run and the installed app can coexist.
+if (!app.isPackaged) {
+  app.setPath("userData", `${app.getPath("userData")}-dev`);
+}
+
 const iconPath = {
   default: path.join(__dirname, "..", "images", "trayicon.png"),
   notice: path.join(__dirname, "..", "images", "trayicon-rd.png"),
