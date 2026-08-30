@@ -36,6 +36,7 @@ await esbuild.build({
       export { classifyUrl } from "./src/url-policy.ts";
       export { SeededPersistence, seedPersistence, clearSeeded } from "./src/seeded-persistence.ts";
       export { RestartScheduler } from "./src/restart-scheduler.ts";
+      export { SessionWatch } from "./src/session-watch.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -78,6 +79,7 @@ const {
   SeededPersistence,
   seedPersistence,
   clearSeeded,
+  SessionWatch,
 } = mod;
 
 let failures = 0;
@@ -525,6 +527,24 @@ eq("redact: values past the depth limit are masked, not passed through",
   eq("restart: cancel clears the pending attempt", timers.length, 0);
   s.schedule();
   eq("restart: the backoff resets after a cancel", delays[5], 30_000);
+// --- session watch ---
+{
+  const sess = (t) => ({ state: "session", session: { uid: "u", refreshToken: t, accessToken: "" } });
+  const out = { state: "signed-out" };
+  const unk = { state: "unknown" };
+  const w = new SessionWatch(2);
+  eq("watch: an unreadable store says nothing", w.observe(unk).kind, "none");
+  eq("watch: an empty store before any session is not a sign-out", w.observe(out).kind, "none");
+  eq("watch: the first session is reported", w.observe(sess("a")).kind, "session");
+  eq("watch: the same token is not reported twice", w.observe(sess("a")).kind, "none");
+  eq("watch: a rotated token is reported", w.observe(sess("b")).kind, "session");
+  eq("watch: one miss is not a sign-out", w.observe(out).kind, "none");
+  eq("watch: an unreadable store does not count as a miss", w.observe(unk).kind, "none");
+  eq("watch: a session in between clears the streak", w.observe(sess("b")).kind, "none");
+  eq("watch: one miss again is still not a sign-out", w.observe(out).kind, "none");
+  eq("watch: the second consecutive miss is a sign-out", w.observe(out).kind, "signed-out");
+  eq("watch: a sign-out is reported once", w.observe(out).kind, "none");
+  eq("watch: signing back in with the old token is reported again", w.observe(sess("b")).kind, "session");
 }
 
 fs.unlinkSync(outfile);
