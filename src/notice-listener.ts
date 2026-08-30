@@ -77,6 +77,7 @@ export class NoticeListener {
   private db?: Firestore;
   private started = false;
   private startedUid?: string;
+  private readonly live = new Set<Notification>();
   private failed = false;
   private ops: Promise<void> = Promise.resolve();
   // Health is per subscription: a snapshot is evidence only about its own
@@ -361,7 +362,19 @@ export class NoticeListener {
 
   private show(title: string, body: string, url?: string): void {
     const n = new Notification({ title, body });
+    // Held until the notification is closed. A Notification that becomes
+    // unreachable can be collected along with the native object behind it, and
+    // the click then never arrives - which is invisible, because the toast
+    // still looks and behaves normally right up until it is clicked.
+    this.live.add(n);
+    const release = () => this.live.delete(n);
+    n.on("close", release);
+    n.on("failed", release);
     n.on("click", () => {
+      // Logged before anything can go wrong with it, so "the click never
+      // arrived" and "the click arrived and had nowhere to go" stay
+      // distinguishable in the log.
+      safeLog("listener-click", { hasUrl: Boolean(url) });
       try {
         this.handlers.openUrl(url);
       } catch (err) {
