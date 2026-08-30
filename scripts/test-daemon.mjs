@@ -34,6 +34,7 @@ await esbuild.build({
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
       export { classifyUrl } from "./src/url-policy.ts";
+      export { RestartScheduler } from "./src/restart-scheduler.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -57,6 +58,7 @@ const mod = await import(pathToFileURL(outfile).href);
 const {
   computeState,
   NotificationDaemon,
+  RestartScheduler,
   diffNotifications,
   unreadTotal,
   stateFromCounts,
@@ -426,6 +428,44 @@ eq("url policy: a site name in userinfo does not make an attacker host internal"
   daemon.stop();
   await new Promise((r) => setTimeout(r, 20));
   eq("daemon: a poll resolving after stop paints nothing", painted, []);
+}
+
+// --- restart scheduler ---
+{
+  const timers = [];
+  const fire = () => { const t = timers.shift(); t.fn(); };
+  const delays = [];
+  let ok = false;
+  const s = new RestartScheduler({
+    attempt: async () => ok,
+    minMs: 30_000,
+    maxMs: 120_000,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); delays.push(ms); return timers.length; },
+    clearTimer: () => { timers.length = 0; },
+  });
+  s.schedule();
+  eq("restart: the first delay is the minimum", delays, [30_000]);
+  s.schedule();
+  eq("restart: scheduling twice does not stack timers", delays, [30_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: a failed attempt backs off", delays, [30_000, 60_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: backoff doubles again", delays, [30_000, 60_000, 120_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: backoff is capped", delays, [30_000, 60_000, 120_000, 120_000]);
+  ok = true;
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: a successful attempt stops scheduling", delays.length, 4);
+  s.schedule();
+  eq("restart: the backoff resets after a success", delays[4], 30_000);
+  s.cancel();
+  eq("restart: cancel clears the pending attempt", timers.length, 0);
+  s.schedule();
+  eq("restart: the backoff resets after a cancel", delays[5], 30_000);
 }
 
 fs.unlinkSync(outfile);
