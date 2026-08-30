@@ -15,7 +15,7 @@ import * as os from "os";
 import * as path from "path";
 
 const stub = `
-export const Notification = class {};
+export const Notification = class { static isSupported() { return false; } };
 export const session = { fromPartition: () => ({ fetch: async () => ({}) }) };
 export const safeStorage = { isEncryptionAvailable: () => false };
 export const app = { getPath: () => "." };
@@ -26,7 +26,7 @@ const outfile = path.join(os.tmpdir(), `daemon-test-${process.pid}.mjs`);
 await esbuild.build({
   stdin: {
     contents: `
-      export { diffNotifications } from "./src/notification-daemon.ts";
+      export { NotificationDaemon, diffNotifications } from "./src/notification-daemon.ts";
       export { computeState, unreadTotal, stateFromCounts, totalFromCounts } from "./src/tray-state.ts";
       export { parseCategories } from "./src/libecity-api.ts";
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
@@ -35,6 +35,7 @@ await esbuild.build({
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
       export { classifyUrl } from "./src/url-policy.ts";
       export { SeededPersistence, seedPersistence, clearSeeded } from "./src/seeded-persistence.ts";
+      export { RestartScheduler } from "./src/restart-scheduler.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -57,6 +58,8 @@ await esbuild.build({
 const mod = await import(pathToFileURL(outfile).href);
 const {
   computeState,
+  NotificationDaemon,
+  RestartScheduler,
   diffNotifications,
   unreadTotal,
   stateFromCounts,
@@ -453,6 +456,75 @@ eq("redact: values past the depth limit are masked, not passed through",
   eq("persistence: exactly one class object is ever handed out", first === second, true);
   clearSeeded();
   eq("persistence: clearing empties the store", await store._get("k3"), null);
+// --- daemon: a poll must not outlive the client that started it ---
+{
+  const painted = [];
+  let releaseA;
+  const clientA = { getCategories: () => new Promise((r) => { releaseA = () => r([cat("message", 1, "2026-01-05")]); }) };
+  const clientB = { getCategories: async () => [cat("dm", 7, "2026-02-05")] };
+  const clients = [clientA, clientB];
+  const daemon = new NotificationDaemon(
+    { setTray: (state, unread) => painted.push([state, unread]), openUrl: () => {} },
+    60_000,
+    () => clients.shift()
+  );
+  daemon.start("token-a");            // poll A starts and hangs
+  daemon.start("token-b");            // account switch; poll B is queued
+  releaseA();                         // account A's poll finally resolves
+  await new Promise((r) => setTimeout(r, 20));
+  eq("daemon: a stale poll paints nothing", painted.some(([, n]) => n === 1), false);
+  eq("daemon: the new client's poll still runs", painted, [["notice", 7]]);
+  daemon.stop();
+}
+{
+  const painted = [];
+  const daemon = new NotificationDaemon(
+    { setTray: (state, unread) => painted.push([state, unread]), openUrl: () => {} },
+    60_000,
+    () => ({ getCategories: async () => [cat("message", 2, "2026-03-05")] })
+  );
+  daemon.start("t");
+  daemon.stop();
+  await new Promise((r) => setTimeout(r, 20));
+  eq("daemon: a poll resolving after stop paints nothing", painted, []);
+}
+
+// --- restart scheduler ---
+{
+  const timers = [];
+  const fire = () => { const t = timers.shift(); t.fn(); };
+  const delays = [];
+  let ok = false;
+  const s = new RestartScheduler({
+    attempt: async () => ok,
+    minMs: 30_000,
+    maxMs: 120_000,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); delays.push(ms); return timers.length; },
+    clearTimer: () => { timers.length = 0; },
+  });
+  s.schedule();
+  eq("restart: the first delay is the minimum", delays, [30_000]);
+  s.schedule();
+  eq("restart: scheduling twice does not stack timers", delays, [30_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: a failed attempt backs off", delays, [30_000, 60_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: backoff doubles again", delays, [30_000, 60_000, 120_000]);
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: backoff is capped", delays, [30_000, 60_000, 120_000, 120_000]);
+  ok = true;
+  fire();
+  await new Promise((r) => setTimeout(r, 0));
+  eq("restart: a successful attempt stops scheduling", delays.length, 4);
+  s.schedule();
+  eq("restart: the backoff resets after a success", delays[4], 30_000);
+  s.cancel();
+  eq("restart: cancel clears the pending attempt", timers.length, 0);
+  s.schedule();
+  eq("restart: the backoff resets after a cancel", delays[5], 30_000);
 }
 
 fs.unlinkSync(outfile);
