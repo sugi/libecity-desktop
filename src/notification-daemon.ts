@@ -1,26 +1,14 @@
 import { Notification } from "electron";
 import { LibecityClient, type NoticeCategory } from "./libecity-api";
 import { log } from "./log";
+import { TYPE_LABELS } from "./notice-text";
 import { computeState, unreadTotal, type TrayState } from "./tray-state";
 
 export { type TrayState };
 
-const TYPE_LABELS: Record<string, string> = {
-  message: "メッセージ",
-  tweet: "つぶやき",
-  official_dm: "運営DM",
-  dm: "DM",
-  follow: "フォロー",
-  usercommunity: "コミュニティ",
-  event: "イベント",
-  live: "ライブ",
-  point: "ポイント",
-  micro_service: "サービス",
-};
-
 export type DaemonHandlers = {
   setTray: (state: TrayState, unread: number) => void;
-  openApp: () => void;
+  openUrl: (url?: string) => void;
 };
 
 // Polls the libecity notice API on its own, independent of any window, and
@@ -35,7 +23,7 @@ export class NotificationDaemon {
 
   constructor(
     private handlers: DaemonHandlers,
-    private intervalMs = 30_000
+    private intervalMs = 15 * 60_000
   ) {}
 
   start(refreshToken: string): void {
@@ -89,7 +77,7 @@ export class NotificationDaemon {
       title: label ? `リベシティ - ${label}` : "リベシティ",
       body: c.latest_notice_title ?? "新しいお知らせがあります",
     });
-    n.on("click", () => this.handlers.openApp());
+    n.on("click", () => this.handlers.openUrl());
     n.show();
     log("daemon-notify", { type: c.type, title: c.latest_notice_title });
   }

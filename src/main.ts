@@ -5,6 +5,7 @@ import { attachTrafficDump, closeDump, openDump, record } from "./traffic-dump";
 import { type AuthSession } from "./firebase-auth";
 import { loadRefreshToken, saveRefreshToken } from "./session-store";
 import { NotificationDaemon, type TrayState } from "./notification-daemon";
+import { NoticeListener } from "./notice-listener";
 import { renderTrayIcon } from "./tray-icon";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
@@ -36,21 +37,64 @@ const hideMainWindow = () => {
   mainWindow?.hide();
 };
 
-// The daemon polls every 30s; only touch the tray when the picture would change.
+// Notifications carry a target. Same policy as setWindowOpenHandler: our own
+// site stays in the window, anything else goes to the browser.
+const openUrl = (url?: string) => {
+  if (!url || !url.startsWith("https://libecity.com/")) {
+    if (url?.startsWith("http")) {
+      void shell.openExternal(url);
+      return;
+    }
+    showMainWindow();
+    return;
+  }
+  if (typeof mainWindow === "undefined") {
+    mainWindow = createWindow(url);
+    return;
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  void mainWindow.loadURL(url);
+};
+
+// The daemon polls; only touch the tray when the picture would change.
 let shownTray: string | undefined;
-const daemon = new NotificationDaemon({
-  setTray: (state: TrayState, unread: number) => {
-    if (!tray) return;
-    const key = `${state}:${unread}`;
-    if (key === shownTray) return;
-    shownTray = key;
-    tray.setImage(renderTrayIcon(state, unread));
-    tray.setToolTip(unread > 0 ? `リベシティ (${unread})` : "リベシティ");
+const setTray = (state: TrayState, unread: number) => {
+  if (!tray) return;
+  const key = `${state}:${unread}`;
+  if (key === shownTray) return;
+  shownTray = key;
+  tray.setImage(renderTrayIcon(state, unread));
+  tray.setToolTip(unread > 0 ? `リベシティ (${unread})` : "リベシティ");
+};
+
+const daemon = new NotificationDaemon({ setTray, openUrl });
+const listener = new NoticeListener({
+  setTray,
+  openUrl,
+  onFailure: () => {
+    const token = loadRefreshToken();
+    if (token) daemon.start(token);
   },
-  openApp: showMainWindow,
 });
 
-function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
+// The listener is preferred, but nothing bounds how long its start() takes -
+// the token refresh underneath it is a bare fetch with no AbortSignal, so a
+// stalled connect would leave the app with neither path running and nothing
+// logged. The poll therefore runs from the start and is stopped only once the
+// listener is confirmed up. Its first tick only seeds its baseline, so the
+// brief overlap cannot double-fire a notification.
+const startNotifications = (refreshToken: string) => {
+  daemon.start(refreshToken);
+  void listener.start(refreshToken).then((ok) => {
+    if (ok) daemon.stop();
+  });
+};
+
+function createWindow(
+  url = "https://libecity.com/",
+  options?: Electron.BrowserWindowConstructorOptions
+) {
   const winState = windowStateKeeper({
     defaultWidth: 1000,
     defaultHeight: 800,
@@ -72,7 +116,7 @@ function createWindow(options?: Electron.BrowserWindowConstructorOptions) {
   // and load the index.html of the app.
   // win.loadFile(path.join(__dirname, "../index.html"));
   void attachTrafficDump(win.webContents);
-  win.loadURL("https://libecity.com/");
+  win.loadURL(url);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://libecity.com/")) {
@@ -105,6 +149,7 @@ ipcMain.on("auth-session", (_event, session: AuthSession) => {
   if (!session.refreshToken) return;
   saveRefreshToken(session.refreshToken);
   daemon.updateRefreshToken(session.refreshToken);
+  startNotifications(session.refreshToken);
 });
 
 app.whenReady().then(() => {
@@ -143,7 +188,7 @@ app.whenReady().then(() => {
   // Start notifications immediately from a stored session, before any login -
   // this is what lets notifications work with the window closed.
   const stored = loadRefreshToken();
-  if (stored) daemon.start(stored);
+  if (stored) startNotifications(stored);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
@@ -172,6 +217,12 @@ app.on("will-quit", closeDump);
 
 app.on("second-instance", () => {
   showMainWindow();
+});
+
+// An open Firestore stream holds handles that would outlive the quit.
+app.on("before-quit", () => {
+  daemon.stop();
+  void listener.stop();
 });
 
 ipcMain.on("show-main-window", showMainWindow);
