@@ -26,6 +26,7 @@ await esbuild.build({
       export { badgeText, drawBadge } from "./src/tray-badge.ts";
       export { redact } from "./src/redact.ts";
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
+      export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -57,6 +58,9 @@ const {
   noticeUrl,
   noticeCategory,
   capNotices,
+  noticeTitle,
+  noticeBody,
+  notificationTitle,
 } = mod;
 
 let failures = 0;
@@ -257,6 +261,72 @@ eq("cap: keeps the newest", capNotices(seven, 5).fire.map((n) => n.documentId), 
 eq("cap: fires oldest first", capNotices(seven, 5).fire[0].documentId, "d3");
 eq("cap: sorts unordered input", capNotices([stamped(2, "2026-01-02T00:00:00Z"), stamped(1, "2026-01-01T00:00:00Z")], 5).fire.map((n) => n.documentId), ["d1", "d2"]);
 eq("cap: undated notices do not throw", capNotices([{ documentId: "x", type: "mention" }], 5).fire.length, 1);
+
+// --- noticeTitle ---
+eq("title: original_title wins",
+  noticeTitle({ documentId: "d", type: "mention", original_title: "既定の文言", user_name: "太郎" }),
+  "既定の文言");
+eq("title: mention names the sender",
+  noticeTitle({ documentId: "d", type: "mention", user_name: "太郎" }),
+  "太郎さんからメッセージが届いています！");
+eq("title: to_all is the broadcast wording",
+  noticeTitle({ documentId: "d", type: "to_all", user_name: "太郎" }),
+  "太郎さんから全体宛てメッセージが届いています！");
+eq("title: reaction counts",
+  noticeTitle({ documentId: "d", type: "reaction", count: 8 }),
+  "本日、メッセージにリアクションがありました（合計8件）");
+eq("title: usercommunity has no room to name",
+  noticeTitle({ documentId: "d", type: "usercommunity_approved" }),
+  "-への参加申請が承認されました。");
+eq("title: delete_completed uses room_name",
+  noticeTitle({ documentId: "d", type: "usercommunity_delete_completed", room_name: "勉強部屋" }),
+  "【削除完了】勉強部屋の自動削除が完了しました");
+eq("title: live prefixes the date",
+  noticeTitle({ documentId: "d", type: "beginners_live", created_at: { toDate: () => new Date("2026-03-05T00:00:00Z") } }),
+  "【03/05】リベシティ使い方ライブが始まりました！");
+eq("title: point_receive formats the amount",
+  noticeTitle({ documentId: "d", type: "point_receive", user_name: "太郎", point_amount: 1500 }),
+  "太郎さんから1,500pt届きました🎁");
+eq("title: point_receive from リベシティ drops the honorific",
+  noticeTitle({ documentId: "d", type: "point_receive", user_name: "リベシティ", point_amount: 10 }),
+  "リベシティから10pt届きました🎁");
+eq("title: an unknown type falls back instead of throwing",
+  noticeTitle({ documentId: "d", type: "brand_new_type" }),
+  "新しいお知らせがあります");
+eq("title: an unknown type prefers its message",
+  noticeTitle({ documentId: "d", type: "brand_new_type", message: "本文" }),
+  "本文");
+
+// --- noticeBody ---
+eq("body: message types show a preview",
+  noticeBody({ documentId: "d", type: "mention", user_name: "太郎", message: "<p>こんにちは</p>" }),
+  "太郎さん：こんにちは");
+eq("body: html entities are decoded",
+  noticeBody({ documentId: "d", type: "dm_mention", user_name: "太郎", message: "<p>a &amp; b</p>" }),
+  "太郎さん：a & b");
+eq("body: an empty message falls back to the sentence",
+  noticeBody({ documentId: "d", type: "mention", user_name: "太郎", message: "" }),
+  "太郎さんからメッセージが届いています！");
+eq("body: an empty to_all message uses the broadcast sentence",
+  noticeBody({ documentId: "d", type: "to_all", user_name: "太郎", message: "<div></div>" }),
+  "太郎さんから全体宛てメッセージが届いています！");
+eq("body: long previews are truncated by byte width",
+  noticeBody({ documentId: "d", type: "mention", user_name: "太郎", message: "あ".repeat(40) }).endsWith("..."),
+  true);
+eq("body: ruled lines are compressed",
+  noticeBody({ documentId: "d", type: "point_receive", original_title: "━━━━告知━━━━" }),
+  "━告知━");
+eq("body: non-message types reuse the title",
+  noticeBody({ documentId: "d", type: "followed", user_name: "太郎" }),
+  "太郎さんからフォローされました！");
+
+// --- notificationTitle ---
+eq("notification title: known category",
+  notificationTitle({ documentId: "d", type: "mention" }), "リベシティ - メッセージ");
+eq("notification title: live category",
+  notificationTitle({ documentId: "d", type: "beginners_live" }), "リベシティ - ライブ");
+eq("notification title: unknown type is unadorned",
+  notificationTitle({ documentId: "d", type: "brand_new_type" }), "リベシティ");
 
 fs.unlinkSync(outfile);
 if (failures) {
