@@ -3,47 +3,9 @@ import { initializeAuth, type Persistence } from "firebase/auth";
 import { refreshIdToken, type RefreshResult } from "./firebase-auth";
 import { API_KEY, PROJECT_ID } from "./firebase-config";
 import { log } from "./log";
+import { clearSeeded, seedPersistence } from "./seeded-persistence";
 
 export type FirebaseSession = { app: FirebaseApp; uid: string };
-
-// The SDK has no public "sign in with a refresh token", so it gets handed the
-// blob it would have written itself and takes over from there. Two things this
-// depends on, both verified by scripts/listen-probe.cjs: initializeAuth
-// instantiates what it is given, so this must be a class and not an object;
-// and the seeded accessToken is checked against accounts:lookup during
-// restore, so it has to be freshly minted.
-//
-// The SDK also caches persistence instances in a module-level map keyed by
-// the class object, with no eviction hook -- deleteApp does not touch it. A
-// fresh class per call would pin one more cached instance (and the tokens
-// its closure holds) on every restore, for the life of the process. Instead
-// there is exactly one class, reading a module-level store that restoreAuth
-// re-seeds and releaseAuth clears, so exactly one entry is ever cached.
-const seededStore = new Map<string, unknown>();
-
-class SeededPersistence {
-  readonly type = "LOCAL";
-  async _isAvailable() {
-    return true;
-  }
-  async _set(k: string, v: unknown) {
-    seededStore.set(k, v);
-  }
-  async _get(k: string) {
-    return seededStore.get(k) ?? null;
-  }
-  async _remove(k: string) {
-    seededStore.delete(k);
-  }
-  _addListener() {}
-  _removeListener() {}
-}
-
-function seedPersistence(key: string, blob: unknown): Persistence {
-  seededStore.clear();
-  seededStore.set(key, blob);
-  return SeededPersistence as unknown as Persistence;
-}
 
 function refreshErrorReason(body: unknown): string | undefined {
   if (typeof body !== "object" || body === null) {
@@ -60,8 +22,8 @@ function refreshErrorReason(body: unknown): string | undefined {
 async function releaseAuthImpl(): Promise<void> {
   for (const app of getApps()) {
     // log() can throw (EPIPE, a dump file closed under it); that must not
-    // reject this catch handler and skip clearing seededStore / the rest of
-    // this loop.
+    // reject this catch handler and skip clearing the seeded store / the
+    // rest of this loop.
     await deleteApp(app).catch((err) => {
       try {
         log("listener-auth-error", { at: "delete-app", error: String(err) });
@@ -70,7 +32,7 @@ async function releaseAuthImpl(): Promise<void> {
       }
     });
   }
-  seededStore.clear();
+  clearSeeded();
 }
 
 async function restoreAuthImpl(
@@ -123,7 +85,10 @@ async function restoreAuthImpl(
       projectId: PROJECT_ID,
     });
     const auth = initializeAuth(app, {
-      persistence: seedPersistence(`firebase:authUser:${API_KEY}:[DEFAULT]`, blob),
+      persistence: seedPersistence(
+        `firebase:authUser:${API_KEY}:[DEFAULT]`,
+        blob
+      ) as Persistence,
     });
     await auth.authStateReady();
     if (auth.currentUser?.uid !== uid) {
