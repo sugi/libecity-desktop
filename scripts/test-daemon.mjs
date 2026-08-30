@@ -33,7 +33,7 @@ await esbuild.build({
       export { redact } from "./src/redact.ts";
       export { noticeUrl, noticeCategory, capNotices } from "./src/notice.ts";
       export { noticeTitle, noticeBody, notificationTitle } from "./src/notice-text.ts";
-      export { classifyUrl } from "./src/url-policy.ts";
+      export { classifyUrl, mayNavigate } from "./src/url-policy.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -71,6 +71,7 @@ const {
   noticeBody,
   notificationTitle,
   classifyUrl,
+  mayNavigate,
 } = mod;
 
 let failures = 0;
@@ -393,6 +394,18 @@ eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.CO
 // userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
 eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
+
+// --- mayNavigate: top-level navigation policy ---
+eq("nav: the site itself may navigate", mayNavigate("https://libecity.com/room_list"), true);
+eq("nav: a site subdomain may navigate", mayNavigate("https://library.libecity.com/x"), true);
+eq("nav: the api subdomain may navigate", mayNavigate("https://api.libecity.com/x"), true);
+eq("nav: a lookalike host may not", mayNavigate("https://libecity.com.evil.test/x"), false);
+eq("nav: a suffix-match host may not", mayNavigate("https://evillibecity.com/x"), false);
+eq("nav: userinfo does not launder the host", mayNavigate("https://libecity.com@evil.test/x"), false);
+eq("nav: plain http may not", mayNavigate("http://libecity.com/x"), false);
+eq("nav: a foreign https host may not", mayNavigate("https://www.youtube.com/x"), false);
+eq("nav: a non-http scheme may not", mayNavigate("javascript:alert(1)"), false);
+eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
 
 fs.unlinkSync(outfile);
 if (failures) {
