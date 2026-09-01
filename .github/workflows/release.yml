@@ -22,11 +22,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run electron-forge -- make -a x64,arm64 -p darwin
-      # rpmbuild's %install runs the host's x86-64 strip over the payload, and it
-      # cannot read aarch64 ELF - electron-installer-redhat exposes no way to turn
-      # that off, so rpm is built for x64 only.
-      - run: npm run electron-forge -- make -a x64,arm64 -p linux --targets @electron-forge/maker-deb,@electron-forge/maker-zip
-      - run: npm run electron-forge -- make -a x64 -p linux --targets @electron-forge/maker-rpm
+      # rpmbuild's %install runs brp-strip with the host's x86-64 strip, which
+      # cannot read the aarch64 ELF inside an arm64 package and kills the build.
+      # electron-installer-redhat renders a fixed spec and exposes no knob for
+      # this, but rpmbuild still reads ~/.rpmmacros: point %__strip at a no-op.
+      # Electron ships its binaries already stripped, so nothing is lost.
+      - run: echo '%__strip /bin/true' >> ~/.rpmmacros
+      - run: npm run electron-forge -- make -a x64,arm64 -p linux
       - run: rm -r out/libecity-desktop*
       - uses: ncipollo/release-action@v1
         with:
