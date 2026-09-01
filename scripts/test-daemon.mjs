@@ -363,7 +363,9 @@ eq("url policy: our site is internal", classifyUrl("https://libecity.com/room_li
 eq("url policy: our site bare root is internal", classifyUrl("https://libecity.com/"), "internal");
 eq("url policy: http on our host is external, not internal", classifyUrl("http://libecity.com/x"), "external");
 eq("url policy: a lookalike host is external", classifyUrl("https://libecity.com.evil.test/x"), "external");
-eq("url policy: a subdomain is external", classifyUrl("https://api.libecity.com/x"), "external");
+eq("url policy: a subdomain is internal", classifyUrl("https://api.libecity.com/x"), "internal");
+eq("url policy: a nested subdomain is internal", classifyUrl("https://a.b.libecity.com/x"), "internal");
+eq("url policy: a suffix-match host is external", classifyUrl("https://evillibecity.com/x"), "external");
 eq("url policy: ordinary https is external", classifyUrl("https://www.youtube.com/live/x"), "external");
 eq("url policy: ordinary http is external", classifyUrl("http://example.test/x"), "external");
 eq("url policy: httpsanything scheme is rejected", classifyUrl("httpsanything:evil"), "reject");
@@ -398,10 +400,10 @@ eq("url: an unknown scheme in other_url yields no target", noticeUrl(N("recruit"
 eq("url: a file scheme in other_url yields no target", noticeUrl(N("other_live", { other_url: "file:///etc/passwd" })), undefined);
 eq("url policy: a trailing-dot host is external", classifyUrl("https://libecity.com."), "external");
 eq("url policy: an explicit default port is still internal", classifyUrl("https://libecity.com:443/x"), "internal");
-eq("url policy: a non-default port is external", classifyUrl("https://libecity.com:8443/x"), "external");
+eq("url policy: a non-default port is still internal", classifyUrl("https://libecity.com:8443/x"), "internal");
 eq("url policy: case is normalised by parsing", classifyUrl("HTTPS://LIBECITY.COM/x"), "internal");
-// userinfo is deliberately not part of an origin - pinned so nobody "fixes" it into a bypass
-eq("url policy: userinfo does not change the origin", classifyUrl("https://evil.test@libecity.com/x"), "internal");
+// userinfo is deliberately not part of the host - pinned so nobody "fixes" it into a bypass
+eq("url policy: userinfo does not change the host", classifyUrl("https://evil.test@libecity.com/x"), "internal");
 eq("url policy: a site name in userinfo does not make an attacker host internal", classifyUrl("https://libecity.com@evil.test/x"), "external");
 
 // --- noticeUrl: only a rooted path may be joined to the site ---
