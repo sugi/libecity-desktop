@@ -1,6 +1,6 @@
 {
   "name": "libecity-desktop",
-  "version": "0.1.4",
+  "version": "1.0.0",
   "description": "libecity desktop app",
   "scripts": {
     "build": "node build.mjs && chmod o+r dist/*",
