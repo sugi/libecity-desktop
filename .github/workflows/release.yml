@@ -22,7 +22,11 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run electron-forge -- make -a x64,arm64 -p darwin
-      - run: npm run electron-forge -- make -a x64,arm64 -p linux
+      # rpmbuild's %install runs the host's x86-64 strip over the payload, and it
+      # cannot read aarch64 ELF - electron-installer-redhat exposes no way to turn
+      # that off, so rpm is built for x64 only.
+      - run: npm run electron-forge -- make -a x64,arm64 -p linux --targets @electron-forge/maker-deb,@electron-forge/maker-zip
+      - run: npm run electron-forge -- make -a x64 -p linux --targets @electron-forge/maker-rpm
       - run: rm -r out/libecity-desktop*
       - uses: ncipollo/release-action@v1
         with:
