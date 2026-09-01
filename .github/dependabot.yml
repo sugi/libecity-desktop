@@ -7,3 +7,15 @@ updates:
     time: "13:00"
   open-pull-requests-limit: 99
   versioning-strategy: increase
+  ignore:
+    # Electron 43 stopped registering the Linux tray icon on desktops using
+    # StatusNotifierItem with xdg-desktop-portal >= 1.20; bisected to 43.4.1
+    # with scripts/tray-probe.cjs and blocked upstream on
+    # https://github.com/electron/electron/issues/51875. Drop this once that
+    # lands and tray-probe.cjs passes on the newer major.
+    - dependency-name: electron
+      versions: [">=43"]
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: weekly
