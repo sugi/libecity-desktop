@@ -19,6 +19,9 @@ export const Notification = class { static isSupported() { return false; } };
 export const session = { fromPartition: () => ({ fetch: async () => ({}) }) };
 export const safeStorage = { isEncryptionAvailable: () => false };
 export const app = { getPath: () => "." };
+export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
+export const clipboard = { writeText: () => {} };
+export const shell = { openExternal: () => {} };
 export default {};
 `;
 
@@ -37,6 +40,7 @@ await esbuild.build({
       export { RestartScheduler } from "./src/restart-scheduler.ts";
       export { SessionWatch } from "./src/session-watch.ts";
       export { classifyUrl, mayNavigate } from "./src/url-policy.ts";
+      export { buildMenuSpec } from "./src/context-menu.ts";
     `,
     resolveDir: ".",
     loader: "ts",
@@ -81,6 +85,7 @@ const {
   clearSeeded,
   SessionWatch,
   mayNavigate,
+  buildMenuSpec,
 } = mod;
 
 let failures = 0;
@@ -564,6 +569,182 @@ eq("nav: plain http may not", mayNavigate("http://libecity.com/x"), false);
 eq("nav: a foreign https host may not", mayNavigate("https://www.youtube.com/x"), false);
 eq("nav: a non-http scheme may not", mayNavigate("javascript:alert(1)"), false);
 eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
+
+// --- buildMenuSpec: what the right-click menu offers ---
+{
+  const ctx = (over = {}) => ({
+    x: 10,
+    y: 20,
+    linkURL: "",
+    mediaType: "none",
+    srcURL: "",
+    isEditable: false,
+    selectionText: "",
+    editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true },
+    sameProcessAsMainFrame: true,
+    ...over,
+  });
+  const labels = (target) =>
+    buildMenuSpec(target).map((s) => (s.kind === "separator" ? "---" : s.label));
+
+  eq(
+    "menu: an internal link opens, copies and goes to the browser",
+    labels(ctx({ linkURL: "https://libecity.com/room_list?room_id=R1" })),
+    ["開く", "リンク先をコピー", "外部ブラウザで開く"]
+  );
+  eq(
+    "menu: an external link cannot be opened in the app",
+    labels(ctx({ linkURL: "https://www.youtube.com/live/x" })),
+    ["リンク先をコピー", "外部ブラウザで開く"]
+  );
+  eq(
+    "menu: mailto is copyable but not openable",
+    labels(ctx({ linkURL: "mailto:someone@example.test" })),
+    ["リンク先をコピー"]
+  );
+  eq("menu: javascript: gets no link section", labels(ctx({ linkURL: "javascript:void(0)" })), []);
+  eq("menu: a file: link gets no link section", labels(ctx({ linkURL: "file:///etc/passwd" })), []);
+  eq(
+    "menu: plain http on our own host is external, so it cannot be opened in the app",
+    labels(ctx({ linkURL: "http://libecity.com/x" })),
+    ["リンク先をコピー", "外部ブラウザで開く"]
+  );
+  eq(
+    "menu: tel: is outside COPY_ONLY_SCHEMES and gets no link section",
+    labels(ctx({ linkURL: "tel:+81312345678" })),
+    []
+  );
+  eq(
+    "menu: the internal open navigates this window",
+    buildMenuSpec(ctx({ linkURL: "https://libecity.com/x" }))[0].action,
+    { kind: "navigate", url: "https://libecity.com/x" }
+  );
+  eq(
+    "menu: copy link carries the target",
+    buildMenuSpec(ctx({ linkURL: "https://example.test/x" }))[0].action,
+    { kind: "copy-text", text: "https://example.test/x" }
+  );
+  eq(
+    "menu: open external carries the target",
+    buildMenuSpec(ctx({ linkURL: "https://example.test/x" }))[1].action,
+    { kind: "open-external", url: "https://example.test/x" }
+  );
+
+  eq(
+    "menu: an https image gets all three items",
+    labels(ctx({ mediaType: "image", srcURL: "https://libecity.com/a.png" })),
+    ["画像をコピー", "画像URLをコピー", "画像を外部ブラウザで開く"]
+  );
+  eq(
+    "menu: a data: image can only be copied as a bitmap",
+    labels(ctx({ mediaType: "image", srcURL: "data:image/png;base64,AAAA" })),
+    ["画像をコピー"]
+  );
+  eq(
+    "menu: a blob: image can only be copied as a bitmap",
+    labels(ctx({ mediaType: "image", srcURL: "blob:https://libecity.com/1" })),
+    ["画像をコピー"]
+  );
+  eq(
+    "menu: copy image carries the click position",
+    buildMenuSpec(ctx({ mediaType: "image", srcURL: "data:image/png;base64,AAAA", x: 3, y: 4 }))[0]
+      .action,
+    { kind: "copy-image", x: 3, y: 4 }
+  );
+  eq("menu: a video target gets nothing", labels(ctx({ mediaType: "video", srcURL: "https://libecity.com/a.mp4" })), []);
+
+  eq(
+    "menu: an image inside a link shows both sections",
+    labels(
+      ctx({
+        linkURL: "https://libecity.com/x",
+        mediaType: "image",
+        srcURL: "https://libecity.com/a.png",
+      })
+    ),
+    [
+      "開く",
+      "リンク先をコピー",
+      "外部ブラウザで開く",
+      "---",
+      "画像をコピー",
+      "画像URLをコピー",
+      "画像を外部ブラウザで開く",
+    ]
+  );
+
+  eq("menu: an input field gets the edit items", labels(ctx({ isEditable: true })), [
+    "切り取り",
+    "コピー",
+    "貼り付け",
+    "---",
+    "すべて選択",
+  ]);
+  eq(
+    "menu: edit items follow editFlags",
+    buildMenuSpec(
+      ctx({
+        isEditable: true,
+        editFlags: { canCut: false, canCopy: false, canPaste: true, canSelectAll: true },
+      })
+    )
+      .filter((s) => s.kind === "role")
+      .map((s) => [s.role, s.enabled]),
+    [
+      ["cut", false],
+      ["copy", false],
+      ["paste", true],
+      ["selectAll", true],
+    ]
+  );
+  eq("menu: a selection outside an input copies only", labels(ctx({ selectionText: "hello" })), [
+    "コピー",
+  ]);
+  eq(
+    "menu: an empty input still gets the edit items",
+    labels(ctx({ isEditable: true, selectionText: "" })).length,
+    5
+  );
+  eq(
+    "menu: an input field with a selection still gets only the edit items",
+    labels(ctx({ isEditable: true, selectionText: "hello" })),
+    ["切り取り", "コピー", "貼り付け", "---", "すべて選択"]
+  );
+  eq(
+    "menu: a link plus a selection shows both sections",
+    labels(ctx({ linkURL: "https://libecity.com/x", selectionText: "hello" })),
+    ["開く", "リンク先をコピー", "外部ブラウザで開く", "---", "コピー"]
+  );
+  eq("menu: nothing under the cursor means no menu", buildMenuSpec(ctx()), []);
+
+  eq(
+    "menu: a cross-process frame loses the bitmap copy but keeps the url items",
+    labels(
+      ctx({
+        mediaType: "image",
+        srcURL: "https://libecity.com/a.png",
+        sameProcessAsMainFrame: false,
+      })
+    ),
+    ["画像URLをコピー", "画像を外部ブラウザで開く"]
+  );
+  eq(
+    "menu: a data: image in a cross-process frame has no image section at all",
+    labels(
+      ctx({
+        mediaType: "image",
+        srcURL: "data:image/png;base64,AAAA",
+        sameProcessAsMainFrame: false,
+      })
+    ),
+    []
+  );
+  eq(
+    "menu: a cross-process frame still gets its link section",
+    labels(ctx({ linkURL: "https://libecity.com/x", sameProcessAsMainFrame: false })),
+    ["開く", "リンク先をコピー", "外部ブラウザで開く"]
+  );
+}
 
 fs.unlinkSync(outfile);
 if (failures) {

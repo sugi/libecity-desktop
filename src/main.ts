@@ -11,6 +11,7 @@ import { NoticeListener } from "./notice-listener";
 import { RestartScheduler } from "./restart-scheduler";
 import { renderTrayIcon } from "./tray-icon";
 import { classifyUrl, mayNavigate } from "./url-policy";
+import { attachContextMenu } from "./context-menu";
 
 // Chromium deletes an IndexedDB store whose Blink serialization format is
 // newer than its own, so hopping between Electron versions during development
@@ -212,6 +213,8 @@ function createWindow(
     }
     return { action: "deny" };
   });
+
+  attachContextMenu(win);
 
   // setWindowOpenHandler only covers window.open and target=_blank. A plain
   // link, location.href, a form post or a server redirect moves this window
