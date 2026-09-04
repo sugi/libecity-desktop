@@ -1,3 +1,4 @@
+import { clipboard, Menu, shell, type BrowserWindow } from "electron";
 import { classifyUrl } from "./url-policy";
 
 // A scheme classifyUrl rejects - the app will not open it - whose target is
@@ -121,4 +122,42 @@ export function buildMenuSpec(target: ContextTarget): MenuSpec[] {
     for (const item of section) out.push(item);
   }
   return out;
+}
+
+function runAction(action: MenuAction, win: BrowserWindow): void {
+  switch (action.kind) {
+    case "navigate":
+      void win.loadURL(action.url);
+      return;
+    case "open-external":
+      void shell.openExternal(action.url);
+      return;
+    case "copy-text":
+      clipboard.writeText(action.text);
+      return;
+    case "copy-image":
+      win.webContents.copyImageAt(action.x, action.y);
+      return;
+  }
+}
+
+function toTemplate(spec: MenuSpec, win: BrowserWindow): Electron.MenuItemConstructorOptions {
+  switch (spec.kind) {
+    case "separator":
+      return { type: "separator" };
+    case "role":
+      return { label: spec.label, role: spec.role, enabled: spec.enabled };
+    case "action":
+      return { label: spec.label, click: () => runAction(spec.action, win) };
+  }
+}
+
+// Electron ships no default context menu for page content, so without this
+// right-clicking the site does nothing at all.
+export function attachContextMenu(win: BrowserWindow): void {
+  win.webContents.on("context-menu", (_event, params) => {
+    const specs = buildMenuSpec(params);
+    if (specs.length === 0) return;
+    Menu.buildFromTemplate(specs.map((spec) => toTemplate(spec, win))).popup({ window: win });
+  });
 }
