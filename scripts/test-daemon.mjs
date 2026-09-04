@@ -604,6 +604,16 @@ eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
   eq("menu: javascript: gets no link section", labels(ctx({ linkURL: "javascript:void(0)" })), []);
   eq("menu: a file: link gets no link section", labels(ctx({ linkURL: "file:///etc/passwd" })), []);
   eq(
+    "menu: plain http on our own host is external, so it cannot be opened in the app",
+    labels(ctx({ linkURL: "http://libecity.com/x" })),
+    ["リンク先をコピー", "外部ブラウザで開く"]
+  );
+  eq(
+    "menu: tel: is outside COPY_ONLY_SCHEMES and gets no link section",
+    labels(ctx({ linkURL: "tel:+81312345678" })),
+    []
+  );
+  eq(
     "menu: the internal open navigates this window",
     buildMenuSpec(ctx({ linkURL: "https://libecity.com/x" }))[0].action,
     { kind: "navigate", url: "https://libecity.com/x" }
@@ -693,6 +703,11 @@ eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
     "menu: an empty input still gets the edit items",
     labels(ctx({ isEditable: true, selectionText: "" })).length,
     5
+  );
+  eq(
+    "menu: an input field with a selection still gets only the edit items",
+    labels(ctx({ isEditable: true, selectionText: "hello" })),
+    ["切り取り", "コピー", "貼り付け", "---", "すべて選択"]
   );
   eq(
     "menu: a link plus a selection shows both sections",

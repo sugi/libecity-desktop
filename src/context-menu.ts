@@ -158,6 +158,12 @@ export function attachContextMenu(win: BrowserWindow): void {
   win.webContents.on("context-menu", (_event, params) => {
     const specs = buildMenuSpec(params);
     if (specs.length === 0) return;
-    Menu.buildFromTemplate(specs.map((spec) => toTemplate(spec, win))).popup({ window: win });
+    // Electron wants the originating frame and source type back so OS-level
+    // features and keyboard-invoked menus behave correctly.
+    Menu.buildFromTemplate(specs.map((spec) => toTemplate(spec, win))).popup({
+      window: win,
+      frame: params.frame ?? undefined,
+      sourceType: params.menuSourceType,
+    });
   });
 }
