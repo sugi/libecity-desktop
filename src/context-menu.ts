@@ -14,9 +14,9 @@ export type EditFlags = {
   canSelectAll: boolean;
 };
 
-// The subset of Electron's ContextMenuParams the decision reads. Electron's
-// own params satisfy this structurally, so the handler passes them straight
-// through and the decision stays testable without Electron.
+// The subset of Electron's ContextMenuParams the decision reads, plus what
+// only the seam can determine. The seam spreads Electron's params and adds
+// the rest, so the decision stays testable without Electron.
 export type ContextTarget = {
   x: number;
   y: number;
@@ -26,6 +26,11 @@ export type ContextTarget = {
   isEditable: boolean;
   selectionText: string;
   editFlags: EditFlags;
+  // Electron's copyImageAt is hardcoded to the primary main frame, whose
+  // renderer cannot hit-test content another process painted - inside a
+  // cross-process iframe the copy is a silent no-op. Only the seam can tell,
+  // by comparing renderer processes; the params alone cannot say.
+  sameProcessAsMainFrame: boolean;
 };
 
 export type MenuAction =
@@ -78,16 +83,16 @@ function linkSection(target: ContextTarget): MenuSpec[] {
 
 function imageSection(target: ContextTarget): MenuSpec[] {
   if (target.mediaType !== "image") return [];
-  // copyImageAt works off the rendered bitmap, so it does not care about the
-  // scheme. The other two do: a data: or blob: source has no address worth
-  // copying and nothing a browser can be handed.
-  const items: MenuSpec[] = [
-    {
+  const items: MenuSpec[] = [];
+  if (target.sameProcessAsMainFrame) {
+    items.push({
       kind: "action",
       label: "画像をコピー",
       action: { kind: "copy-image", x: target.x, y: target.y },
-    },
-  ];
+    });
+  }
+  // The bitmap copy ignores the scheme; these two need an address, and a data:
+  // or blob: source has none worth copying and nothing a browser can open.
   if (classifyUrl(target.srcURL) !== "reject") {
     items.push(copyText("画像URLをコピー", target.srcURL));
     items.push(openExternal("画像を外部ブラウザで開く", target.srcURL));
@@ -156,7 +161,12 @@ function toTemplate(spec: MenuSpec, win: BrowserWindow): Electron.MenuItemConstr
 // right-clicking the site does nothing at all.
 export function attachContextMenu(win: BrowserWindow): void {
   win.webContents.on("context-menu", (_event, params) => {
-    const specs = buildMenuSpec(params);
+    // A null frame means it navigated or was destroyed before this arrived;
+    // there is then no process to compare and nothing left to copy from.
+    const specs = buildMenuSpec({
+      ...params,
+      sameProcessAsMainFrame: params.frame?.processId === win.webContents.mainFrame.processId,
+    });
     if (specs.length === 0) return;
     // Electron wants the originating frame and source type back so OS-level
     // features and keyboard-invoked menus behave correctly.

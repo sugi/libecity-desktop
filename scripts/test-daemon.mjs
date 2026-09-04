@@ -581,6 +581,7 @@ eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
     isEditable: false,
     selectionText: "",
     editFlags: { canCut: true, canCopy: true, canPaste: true, canSelectAll: true },
+    sameProcessAsMainFrame: true,
     ...over,
   });
   const labels = (target) =>
@@ -715,6 +716,34 @@ eq("nav: an unparseable value may not", mayNavigate("not a url"), false);
     ["開く", "リンク先をコピー", "外部ブラウザで開く", "---", "コピー"]
   );
   eq("menu: nothing under the cursor means no menu", buildMenuSpec(ctx()), []);
+
+  eq(
+    "menu: a cross-process frame loses the bitmap copy but keeps the url items",
+    labels(
+      ctx({
+        mediaType: "image",
+        srcURL: "https://libecity.com/a.png",
+        sameProcessAsMainFrame: false,
+      })
+    ),
+    ["画像URLをコピー", "画像を外部ブラウザで開く"]
+  );
+  eq(
+    "menu: a data: image in a cross-process frame has no image section at all",
+    labels(
+      ctx({
+        mediaType: "image",
+        srcURL: "data:image/png;base64,AAAA",
+        sameProcessAsMainFrame: false,
+      })
+    ),
+    []
+  );
+  eq(
+    "menu: a cross-process frame still gets its link section",
+    labels(ctx({ linkURL: "https://libecity.com/x", sameProcessAsMainFrame: false })),
+    ["開く", "リンク先をコピー", "外部ブラウザで開く"]
+  );
 }
 
 fs.unlinkSync(outfile);
